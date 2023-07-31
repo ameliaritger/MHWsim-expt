@@ -18,8 +18,9 @@ library(heatwaveR)
 library(ggpubr) #combine multiple ggplots
 ```
 
-mohawk_mooring_mko_20230608
-naples_mooring_nap_20230608
+Datafiles to download from SBC LTER: 
+mohawk_mooring_mko_20230608.csv
+naples_mooring_nap_20230608.csv
 
 #Load data
 ```{r}
