@@ -19,8 +19,8 @@ library(ggpubr) #combine multiple ggplots
 ```
 
 Datafiles to download from SBC LTER: 
-mohawk_mooring_mko_20230608.csv
-naples_mooring_nap_20230608.csv
+mohawk_mooring_mko_20230608.csv (https://sbclter.msi.ucsb.edu/data/catalog/package/?package=knb-lter-sbc.2007)
+naples_mooring_nap_20230608.csv (https://sbclter.msi.ucsb.edu/data/catalog/package/?package=knb-lter-sbc.2002)
 
 #Load data
 ```{r}
@@ -127,6 +127,19 @@ mhw_event <- mhw$event %>%
   select(1:10)
 
 #write_csv(mhw_event, here("tables", "mohawk_mhw_all.csv"))
+```
+
+Plot histogram(s)
+```{r}
+ggplot(mhw_event, aes(x=duration)) +
+  geom_histogram(bins=10) +
+  labs(title="MHW duration at NAP since 2013")
+
+ggplot(mhw_event, aes(x=intensity_max)) +
+  geom_histogram(bins=10) +
+  labs(title="MHW maximum intensity at NAP since 2013")
+
+#ggsave(here("figures", "mhw_hist_int_nap.png"), width = 20, height = 7)
 ```
 
 Get 95% quantile and average values of duration, intensity
