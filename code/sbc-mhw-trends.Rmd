@@ -24,7 +24,7 @@ naples_mooring_nap_20230608.csv (https://sbclter.msi.ucsb.edu/data/catalog/packa
 
 #Load data
 ```{r}
-temp_raw <-  read_csv(here("data", "naples_mooring_nap_20230608.csv"), col_names = TRUE) %>%
+temp_raw <-  read_csv(here("data", "mohawk_mooring_mko_20230608.csv"), col_names = TRUE) %>%
   select(year, month, day,  decimal_time, Temp_adcp, Temp_top, Temp_mid, Temp_bot,  ADCP_depth) %>%
   clean_names()
 ```
@@ -53,6 +53,8 @@ temp_clean <- temp_clean %>%
 
 #Get monthly average temperature for each month across years
 ```{r}
+decade_time <- "2013-08-01"
+
 mhw_sum <- temp_clean %>%
   group_by(year, month) %>%
   summarize(temp=mean(temp)) %>%
@@ -103,11 +105,8 @@ temp_heatwaver <- temp_clean %>%
   select(t, temp)
 
 #identify start and end dates of df
-head(temp_heatwaver)
-tail(temp_heatwaver)
-
-start_date <- "2001-02-14" #CHECK VALUES MANUALLY
-end_date <- "2023-04-11" #CHECK VALUES MANUALLY
+start_date <- as.character((head(temp_heatwaver$t,1)))
+end_date <- as.character((tail(temp_heatwaver$t,1)))
 
 # Detect the events in a time series
 ts <- heatwaveR::ts2clm(temp_heatwaver, x=t, y=temp, climatologyPeriod = c(start_date, end_date))
@@ -119,27 +118,47 @@ Identify MHW events
 mhw_event <- mhw$event %>%
    dplyr::ungroup() %>%
    dplyr::select(event_no, duration, date_start, date_peak, date_end, intensity_max, intensity_mean, intensity_cumulative, rate_onset, rate_decline) %>%
-  filter(date_start > ymd("2013-08-01")) %>% #Only look at MHWs in the last decade
+  filter(date_start > ymd(decade_time)) %>% #Only look at MHWs in the last decade
   mutate(month_start=month(date_start),
          month_end=month(date_end)) %>%
-  filter(between(month_start,1,2) | between(month_start,8,12)) %>% #CHECK MANUALLY BEFORE FILTERING
+  filter(between(month_start,1,2) | between(month_start,8,12)) %>% #CHECK MANUALLY BEFORE FILTERING, make sure there aren't long duration MHWs that started in June/July and extended well into August and beyond
   dplyr::arrange(-duration) %>%
   select(1:10)
 
 #write_csv(mhw_event, here("tables", "mohawk_mhw_all.csv"))
 ```
 
+Combine NAP and MKO to summarize MHW patterns
+```{r}
+#mhw_event <- full_join(mhw_event_mko,mhw_event_nap) #make sure you re-run code above naming mhw_event appropriately
+
+#duration_95 <- unname(quantile(mhw_event$duration, c(.95)))
+#duration_mean <- mean(mhw_event$duration)
+#
+#intensity_95 <- unname(quantile(mhw_event$intensity_max, c(.95)))
+#intensity_mean <- mean(mhw_event$intensity_max)
+#
+#intensity2_95 <- unname(quantile(mhw_event$intensity_mean, c(.95)))
+#intensity2_mean <- mean(mhw_event$intensity_mean)
+#
+#mhw_summary <- data.frame(Metric=c("Duration", "Max intensity", "Mean intensity"),
+#                          Percentile_95=c(duration_95,intensity_95,intensity2_95),
+#                          Mean=c(duration_mean,intensity_mean,intensity2_mean))
+
+#write_csv(mhw_summary, here("tables", "combined_mhw_summary.csv"))
+```
+
 Plot histogram(s)
 ```{r}
 ggplot(mhw_event, aes(x=duration)) +
-  geom_histogram(bins=10) +
-  labs(title="MHW duration at NAP since 2013")
+  geom_histogram(bins=20) +
+  labs(title="MHW duration since 2013")
 
 ggplot(mhw_event, aes(x=intensity_max)) +
-  geom_histogram(bins=10) +
-  labs(title="MHW maximum intensity at NAP since 2013")
+  geom_histogram(bins=15) +
+  labs(title="MHW maximum intensity since 2013")
 
-#ggsave(here("figures", "mhw_hist_int_nap.png"), width = 20, height = 7)
+#ggsave(here("figures", "mhw_hist_int_mko.png"), width = 20, height = 7)
 ```
 
 Get 95% quantile and average values of duration, intensity
@@ -150,9 +169,12 @@ duration_mean <- mean(mhw_event$duration)
 intensity_95 <- unname(quantile(mhw_event$intensity_max, c(.95)))
 intensity_mean <- mean(mhw_event$intensity_max)
 
-mhw_summary <- data.frame(Metric=c("Duration", "Max intensity"),
-                          Percentile_95=c(duration_95,intensity_95),
-                          Mean=c(duration_mean,intensity_mean))
+intensity2_95 <- unname(quantile(mhw_event$intensity_mean, c(.95)))
+intensity2_mean <- mean(mhw_event$intensity_mean)
+
+mhw_summary <- data.frame(Metric=c("Duration", "Max intensity", "Mean intensity"),
+                          Percentile_95=c(duration_95,intensity_95,intensity2_95),
+                          Mean=c(duration_mean,intensity_mean,intensity2_mean))
 
 #write_csv(mhw_summary, here("tables", "mohawk_mhw_summary.csv"))
 ```
@@ -163,7 +185,7 @@ mhw_summary <- data.frame(Metric=c("Duration", "Max intensity"),
 climatology <- mhw$climatology %>%
   arrange(t)
 
-mhw_start <- which(climatology$t == "2013-08-01")[1]
+mhw_start <- which(climatology$t == decade_time)[1]
 mhw_end <- which(climatology$t == end_date)[1]
 
 #subset for dates of interest
