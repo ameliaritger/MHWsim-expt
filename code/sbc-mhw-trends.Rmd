@@ -132,18 +132,24 @@ Combine NAP and MKO to summarize MHW patterns
 ```{r}
 #mhw_event <- full_join(mhw_event_mko,mhw_event_nap) #make sure you re-run code above naming mhw_event appropriately
 
-#duration_95 <- unname(quantile(mhw_event$duration, c(.95)))
-#duration_mean <- mean(mhw_event$duration)
-#
-#intensity_95 <- unname(quantile(mhw_event$intensity_max, c(.95)))
-#intensity_mean <- mean(mhw_event$intensity_max)
-#
-#intensity2_95 <- unname(quantile(mhw_event$intensity_mean, c(.95)))
-#intensity2_mean <- mean(mhw_event$intensity_mean)
-#
-#mhw_summary <- data.frame(Metric=c("Duration", "Max intensity", "Mean intensity"),
-#                          Percentile_95=c(duration_95,intensity_95,intensity2_95),
-#                          Mean=c(duration_mean,intensity_mean,intensity2_mean))
+duration_95 <- unname(quantile(mhw_event$duration, c(.95)))
+duration_mean <- mean(mhw_event$duration)
+
+intensity_95 <- unname(quantile(mhw_event$intensity_max, c(.95)))
+intensity_mean <- mean(mhw_event$intensity_max)
+
+intensity2_95 <- unname(quantile(mhw_event$intensity_mean, c(.95)))
+intensity2_mean <- mean(mhw_event$intensity_mean)
+
+onset_95 <- unname(quantile(mhw_event$rate_onset, c(.95)))
+onset_mean <- mean(mhw_event$rate_onset)
+
+decline_95 <- unname(quantile(mhw_event$rate_decline, c(.95)))
+decline_mean <- mean(mhw_event$rate_decline)
+
+mhw_summary <- data.frame(Metric=c("Duration", "Max intensity", "Mean intensity"),
+                          Percentile_95=c(duration_95,intensity_95,intensity2_95),
+                          Mean=c(duration_mean,intensity_mean,intensity2_mean))
 
 #write_csv(mhw_summary, here("tables", "combined_mhw_summary.csv"))
 ```
