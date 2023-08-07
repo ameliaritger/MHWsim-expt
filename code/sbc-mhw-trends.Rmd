@@ -24,7 +24,7 @@ naples_mooring_nap_20230608.csv (https://sbclter.msi.ucsb.edu/data/catalog/packa
 
 #Load data
 ```{r}
-temp_raw <-  read_csv(here("data", "mohawk_mooring_mko_20230608.csv"), col_names = TRUE) %>%
+temp_raw <-  read_csv(here("data", "naples_mooring_nap_20230608.csv"), col_names = TRUE) %>%
   select(year, month, day,  decimal_time, Temp_adcp, Temp_top, Temp_mid, Temp_bot,  ADCP_depth) %>%
   clean_names()
 ```
@@ -198,6 +198,20 @@ mhw_end <- which(climatology$t == end_date)[1]
 mhw_subset <- mhw$climatology %>%
   slice(mhw_start:mhw_end) %>%
   mutate(month=as.factor(month(t))) 
+
+#mhw_profile_nap <- mhw$climatology %>%
+#  select(t, temp) %>%
+#  filter(t > ymd("2020-01-01") & t < ymd("2021-01-01"))
+
+#mhw_profile_mko <- mhw_profile_mko %>%
+#  rename(temp_mko=temp2)
+
+#mhw_profile_all <- full_join(mhw_profile_mko, mhw_profile_nap) %>%
+#  mutate(temp_final = rowMeans(select(.,starts_with("temp")), na.rm = TRUE)) %>%
+#  select(t, temp_final) %>%
+#  rename(temp=temp_final)
+
+#write_csv(mhw_profile_all, here("data", "mhw_profile.csv"))
 
 #Create a df of dates to shade the time period of interest in ggplot
 dateRanges <- data.frame(
