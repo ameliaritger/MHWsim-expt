@@ -117,7 +117,7 @@ Identify MHW events
 ```{r}
 mhw_event <- mhw$event %>%
    dplyr::ungroup() %>%
-   dplyr::select(event_no, duration, date_start, date_peak, date_end, intensity_max, intensity_mean, intensity_cumulative, rate_onset, rate_decline) %>%
+   dplyr::select(event_no, duration, date_start, date_peak, date_end, intensity_max, intensity_max_relThresh, intensity_max_abs, intensity_mean, intensity_cumulative, rate_onset, rate_decline) %>%
   filter(date_start > ymd(decade_time)) %>% #Only look at MHWs in the last decade
   mutate(month_start=month(date_start),
          month_end=month(date_end)) %>%
@@ -197,7 +197,10 @@ mhw_end <- which(climatology$t == end_date)[1]
 #subset for dates of interest
 mhw_subset <- mhw$climatology %>%
   slice(mhw_start:mhw_end) %>%
-  mutate(month=as.factor(month(t))) 
+  mutate(month=as.factor(month(t))) %>%
+  mutate(thresh2=seas+3.5,
+         thresh3=seas+10)
+  #filter(t>ymd("2014-08-01") & t<ymd("2014-11-01"))
 
 #mhw_profile_nap <- mhw$climatology %>%
 #  select(t, temp) %>%
@@ -218,7 +221,7 @@ dateRanges <- data.frame(
   start = seq(ymd("1900-08-01"), ymd("2100-08-01"), "1 year"),
   end = seq(ymd("1901-02-01"), ymd("2101-02-01"), "1 year")
 )
-
+               
 #plot clean ribbon
 ggplot(mhw_subset, aes(x = t, ymax = pmax(thresh, temp), ymin = thresh)) +
   geom_rect(data = dateRanges, aes(xmin = start , xmax = end, ymin = -Inf, ymax = Inf),
@@ -226,18 +229,22 @@ ggplot(mhw_subset, aes(x = t, ymax = pmax(thresh, temp), ymin = thresh)) +
   geom_line(aes(y = seas, colour = "seas"), size = 0.8) +
   geom_ribbon(fill = "red") +
   geom_line(aes(y = thresh, colour = "thresh"), size = 0.8) +
+  geom_line(aes(y = thresh2, colour = "thresh2"), size = 1.0) +
+  geom_line(aes(y = thresh3, colour = "thresh3"), size = 1.0) +
   geom_line(aes(y = temp, colour = "temp"), alpha=0.3) +
   scale_colour_manual(name = "Line Colour",
                       values = c("seas" = "dodgerblue4",
                                  "temp" = "black", 
-                                 "thresh" =  "chartreuse4"),
-                      labels= c("Climatology", "Temperature", "Threshold")) +
+                                 "thresh" =  "chartreuse4",
+                                 "thresh2" =  "orange2",
+                                 "thresh3" =  "red4"),
+                      labels= c("Climatology", "Temperature", "Threshold", "Severe", "Extreme")) +
   scale_x_date(date_labels = "%b %Y",
                breaks = scales::date_breaks("6 months"),
                expand=c(0,0),
                limits = c(min(mhw_subset$t), 
                          max = max(mhw_subset$t))) +
-  scale_y_continuous(limits = c(10, 22), breaks = seq(10, 22, by = 2)) +
+  scale_y_continuous(limits = c(10, 26), breaks = seq(10, 26, by = 2)) +
   guides(colour = guide_legend(override.aes = list(fill = NA))) +
   labs(y = expression(paste("Temperature (", degree, "C)")),
        x = "Date") +
@@ -250,5 +257,5 @@ ggplot(mhw_subset, aes(x = t, ymax = pmax(thresh, temp), ymin = thresh)) +
         legend.position="top",
         legend.title = element_blank())
 
-#ggsave(here("figures", "mhw_plot_nap.png"), width = 20, height = 7)
+#ggsave(here("figures", "MHWsim_year_mean.png"), width = 20, height = 7)
 ```
