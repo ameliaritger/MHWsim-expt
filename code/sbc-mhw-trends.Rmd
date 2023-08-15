@@ -24,7 +24,7 @@ naples_mooring_nap_20230608.csv (https://sbclter.msi.ucsb.edu/data/catalog/packa
 
 #Load data
 ```{r}
-temp_raw <-  read_csv(here("data", "naples_mooring_nap_20230608.csv"), col_names = TRUE) %>%
+temp_raw <-  read_csv(here("data", "mohawk_mooring_mko_20230608.csv"), col_names = TRUE) %>%
   select(year, month, day,  decimal_time, Temp_adcp, Temp_top, Temp_mid, Temp_bot,  ADCP_depth) %>%
   clean_names()
 ```
@@ -123,7 +123,7 @@ mhw_event <- mhw$event %>%
          month_end=month(date_end)) %>%
   filter(between(month_start,1,2) | between(month_start,8,12)) %>% #CHECK MANUALLY BEFORE FILTERING, make sure there aren't long duration MHWs that started in June/July and extended well into August and beyond
   dplyr::arrange(-duration) %>%
-  select(1:10)
+  select(1:12)
 
 #write_csv(mhw_event, here("tables", "mohawk_mhw_all.csv"))
 ```
@@ -147,9 +147,9 @@ onset_mean <- mean(mhw_event$rate_onset)
 decline_95 <- unname(quantile(mhw_event$rate_decline, c(.95)))
 decline_mean <- mean(mhw_event$rate_decline)
 
-mhw_summary <- data.frame(Metric=c("Duration", "Max intensity", "Mean intensity"),
-                          Percentile_95=c(duration_95,intensity_95,intensity2_95),
-                          Mean=c(duration_mean,intensity_mean,intensity2_mean))
+mhw_summary <- data.frame(Metric=c("Duration", "Max intensity", "Mean intensity", "Onset rate", "Decline rate"),
+                          Percentile_95=c(duration_95,intensity_95,intensity2_95,onset_95,decline_95),
+                          Mean=c(duration_mean,intensity_mean,intensity2_mean,onset_mean,decline_mean))
 
 #write_csv(mhw_summary, here("tables", "combined_mhw_summary.csv"))
 ```
@@ -198,16 +198,16 @@ mhw_end <- which(climatology$t == end_date)[1]
 mhw_subset <- mhw$climatology %>%
   slice(mhw_start:mhw_end) %>%
   mutate(month=as.factor(month(t))) %>%
-  mutate(thresh2=seas+3.5,
-         thresh3=seas+10)
-  #filter(t>ymd("2014-08-01") & t<ymd("2014-11-01"))
+  mutate(thresh2=seas+5,
+         thresh3=seas+8) %>%
+  filter(t>ymd("2014-08-01") & t<ymd("2015-03-01"))
 
-#mhw_profile_nap <- mhw$climatology %>%
-#  select(t, temp) %>%
-#  filter(t > ymd("2020-01-01") & t < ymd("2021-01-01"))
+#mhw_profile_mko <- mhw$climatology %>%
+# select(t, temp) %>%
+# filter(t > ymd("2020-01-01") & t < ymd("2021-01-01"))
 
 #mhw_profile_mko <- mhw_profile_mko %>%
-#  rename(temp_mko=temp2)
+# rename(temp_mko=temp)
 
 #mhw_profile_all <- full_join(mhw_profile_mko, mhw_profile_nap) %>%
 #  mutate(temp_final = rowMeans(select(.,starts_with("temp")), na.rm = TRUE)) %>%
@@ -240,7 +240,7 @@ ggplot(mhw_subset, aes(x = t, ymax = pmax(thresh, temp), ymin = thresh)) +
                                  "thresh3" =  "red4"),
                       labels= c("Climatology", "Temperature", "Threshold", "Severe", "Extreme")) +
   scale_x_date(date_labels = "%b %Y",
-               breaks = scales::date_breaks("6 months"),
+               breaks = scales::date_breaks("1 month"),
                expand=c(0,0),
                limits = c(min(mhw_subset$t), 
                          max = max(mhw_subset$t))) +
@@ -249,13 +249,13 @@ ggplot(mhw_subset, aes(x = t, ymax = pmax(thresh, temp), ymin = thresh)) +
   labs(y = expression(paste("Temperature (", degree, "C)")),
        x = "Date") +
   theme_bw() +
-  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=14),
-        axis.text.y=element_text(size=14),
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=20),
+        axis.text.y=element_text(size=20),
         axis.title.x=element_text(size=18),
         axis.title.y=element_text(size=18),
-        legend.text=element_text(size=12),
+        legend.text=element_text(size=20),
         legend.position="top",
         legend.title = element_blank())
 
-#ggsave(here("figures", "MHWsim_year_mean.png"), width = 20, height = 7)
+#ggsave(here("figures", "MHWsim_profile.png"), width = 15, height = 7)
 ```
