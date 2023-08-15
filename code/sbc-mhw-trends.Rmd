@@ -200,16 +200,11 @@ mhw_subset <- mhw$climatology %>%
   slice(mhw_start:mhw_end) %>%
   mutate(month=as.factor(month(t))) %>%
   mutate(thresh2=seas+5,
-<<<<<<< HEAD
-         thresh3=seas+8) %>%
-  filter(t>ymd("2014-08-01") & t<ymd("2015-03-01"))
-=======
          thresh3=seas+8,
          extreme=temp+4,
          chill=temp-4) %>%
-  filter(t>=ymd("2015-07-01") & t<ymd("2016-02-01"))
->>>>>>> c0fb1217eca06d6ef5cf99b2bfbc92f460aa9507
-
+  filter(t>=ymd("2015-09-01") & t<ymd("2015-10-01"))
+ 
 #mhw_profile_mko <- mhw$climatology %>%
 # select(t, temp) %>%
 # filter(t > ymd("2020-01-01") & t < ymd("2021-01-01"))
@@ -242,22 +237,11 @@ ggplot(mhw_subset, aes(x = t, ymax = pmax(thresh, temp), ymin = thresh)) +
   geom_line(aes(y = temp, colour = "temp"), size=0.8, alpha=0.3) +
   #geom_line(aes(y=25, colour="extreme"), linetype="dashed", size=1, alpha=0.4) +
   scale_colour_manual(name = "Line Colour",
-                      values = c("extreme" = "black",
-                                 "seas" = "dodgerblue4",
-                                 "thresh" =  "forestgreen",
-                                 #"thresh2" =  "dodgerblue4",
-                                 "temp" = "black", 
-<<<<<<< HEAD
-                                 "thresh" =  "chartreuse4",
+                      values = c("thresh" =  "chartreuse4",
                                  "thresh2" =  "orange2",
                                  "thresh3" =  "red4"),
-                      labels= c("Climatology", "Temperature", "Threshold", "Severe", "Extreme")) +
-  scale_x_date(date_labels = "%b %Y",
-=======
-                                 "thresh3" =  "darkorange1"),
                       labels= c("Climatology","Temperature","Threshold")) +
   scale_x_date(date_labels = "%b %d",
->>>>>>> c0fb1217eca06d6ef5cf99b2bfbc92f460aa9507
                breaks = scales::date_breaks("1 month"),
                expand=c(0,0),
                limits = c(min(mhw_subset$t), 
@@ -320,11 +304,7 @@ ggplot(mhw_subset_diurnal, aes(x = date_time)) +
         legend.position="top",
         legend.title = element_blank())
 
-<<<<<<< HEAD
-#ggsave(here("figures", "MHWsim_profile.png"), width = 15, height = 7)
-=======
 #ggsave(here("figures", "MHWsim_daily.png"), width = 20, height = 7)
->>>>>>> c0fb1217eca06d6ef5cf99b2bfbc92f460aa9507
 ```
 
 ## Combine the two plots to visualize
@@ -340,7 +320,7 @@ mhw_subset_avg <- mhw_subset_diurnal %>%
 
 mhw_subset_comb <- left_join(mhw_subset_avg, mhw_subset, by="t") %>%
   group_by(t) %>%
-  mutate_at(vars(temp.y,chill.y,extreme.y), funs(replace(., duplicated(.), NA)))
+  mutate_at(vars(temp.y,chill.y,extreme.y), funs(replace(., duplicated(.), NA))) #don't fill with values, but with NAs (for ggplot)
 
 ggplot(mhw_subset_comb, aes(x = date_time)) +
       geom_line(data=mhw_subset_comb[!is.na(mhw_subset_comb$seas),], aes(y = seas), colour="black", size = 0.8, linetype="dotted") +
@@ -377,5 +357,35 @@ ggplot(mhw_subset_comb, aes(x = date_time)) +
         legend.title = element_blank())
 
 #ggsave(here("figures", "MHWsim_all.png"), width = 20, height = 7)
+```
+
+#Create "final" MHW profile dataframe
+```{r}
+mhw_profile <- mhw_subset_comb %>%
+  select(date_time, t, temp.x, extreme.x, chill.x, temp.y, extreme.y, chill.y, seas) %>%
+  group_by(t) %>%
+  summarize(mean_day_b = mean(temp.x),
+            mhw_b = mean(temp.y, na.rm = TRUE),
+            mean_day_x = mean(extreme.x),
+            mhw_x = mean(extreme.y, na.rm = TRUE),
+            mean_day_c = mean(chill.x),
+            mhw_c = mean(chill.y, na.rm = TRUE),
+            seas = mean(seas)) %>%
+  mutate(diff = mhw_c-seas) %>%
+  summarize(mean_diff = mean(diff)) #comment this out, used to compare 4 vs 4.5C with climatology
+
+#plot difference between climatology and -XC
+ggplot(mhw_profile, aes(x=t)) +
+  geom_line(aes(y = diff), colour = "blue", size = 0.8)
+
+#Compare -XC with Climatology
+ggplot(mhw_profile, aes(x=t)) +
+  geom_line(aes(y = mean_day_c), colour = "blue", size = 0.8) +
+  geom_smooth(aes(y=mhw_c), method = "lm", se = F, colour = "red") +
+  geom_line(aes(y = mhw_c), colour = "red", size = 0.8) +
+  geom_line(aes(y = seas), colour = "orange", size = 0.8)
+  
+#ggsave(here("figures", "MHWdiff_4.5.png"), width = 20, height = 7)
+
 ```
 
