@@ -124,7 +124,8 @@ mhw_event <- mhw$event %>%
          month_end=month(date_end)) %>%
   filter(between(month_start,1,2) | between(month_start,8,12)) %>% #CHECK MANUALLY BEFORE FILTERING, make sure there aren't long duration MHWs that started in June/July and extended well into August and beyond
   dplyr::arrange(-duration) %>%
-  select(1:12)
+  select(1:12) %>%
+  filter(date_start < ymd("2017-01-01") & date_end > ymd("2014-06-01"))
 
 #write_csv(mhw_event, here("tables", "mohawk_mhw_all.csv"))
 ```
@@ -359,9 +360,9 @@ ggplot(mhw_subset_comb, aes(x = date_time)) +
 #ggsave(here("figures", "MHWsim_all.png"), width = 20, height = 7)
 ```
 
-#Create "final" MHW profile dataframe
+#Decide what value of C for "chilled" treatment
 ```{r}
-mhw_profile <- mhw_subset_comb %>%
+mhw_comp <- mhw_subset_comb %>%
   select(date_time, t, temp.x, extreme.x, chill.x, temp.y, extreme.y, chill.y, seas) %>%
   group_by(t) %>%
   summarize(mean_day_b = mean(temp.x),
@@ -371,21 +372,96 @@ mhw_profile <- mhw_subset_comb %>%
             mean_day_c = mean(chill.x),
             mhw_c = mean(chill.y, na.rm = TRUE),
             seas = mean(seas)) %>%
-  mutate(diff = mhw_c-seas) %>%
-  summarize(mean_diff = mean(diff)) #comment this out, used to compare 4 vs 4.5C with climatology
+  mutate(diff = mhw_c-seas)# %>%
+  #summarize(mean_diff = mean(diff)) #comment this out, used to compare 4 vs 4.5C with climatology
 
 #plot difference between climatology and -XC
-ggplot(mhw_profile, aes(x=t)) +
+ggplot(mhw_comp, aes(x=t)) +
   geom_line(aes(y = diff), colour = "blue", size = 0.8)
 
 #Compare -XC with Climatology
-ggplot(mhw_profile, aes(x=t)) +
+ggplot(mhw_comp, aes(x=t)) +
   geom_line(aes(y = mean_day_c), colour = "blue", size = 0.8) +
   geom_smooth(aes(y=mhw_c), method = "lm", se = F, colour = "red") +
   geom_line(aes(y = mhw_c), colour = "red", size = 0.8) +
   geom_line(aes(y = seas), colour = "orange", size = 0.8)
   
 #ggsave(here("figures", "MHWdiff_4.5.png"), width = 20, height = 7)
+```
 
+#Create dfs for MHW temperatures and climatology values
+```{r}
+mhw_profile <- temp_clean %>%
+  filter(date>=ymd("2015-08-15") & date<ymd("2016-03-01")) %>%
+  mutate(t = date,
+         time=format(times(decimal_time))) %>%
+  unite(date_time, c(t, time), sep = " ", remove = TRUE) %>% # combine the date and time columns
+  mutate(date_time=ymd_hms(date_time)) %>%
+  select(date_time, temp) %>%
+  mutate(extreme=temp+4,
+         chill=temp-4,
+         t=date(date_time))
+
+mhw_seas <- mhw$climatology %>%
+  slice(mhw_start:mhw_end) %>%
+  mutate(month=as.factor(month(t))) %>%
+  filter(t>=ymd("2015-08-15") & t<ymd("2016-03-01")) %>%
+  select(t, seas)
+```
+
+# Transform temperature data based on climatology data, plot and generate .csv file
+```{r}
+joined_df <- left_join(mhw_profile, mhw_seas, by = "t") %>%
+  mutate(seas_thresh = seas+4,
+         seas_extreme = seas+8) %>%
+  group_by(t) %>%
+  mutate(mean_temp = mean(temp),
+         temp_diff=mean_temp-seas,
+         temp_diff_thresh=mean_temp-seas_thresh,
+         temp_diff_extreme=mean_temp-seas_extreme,
+         adjusted_temp=temp-temp_diff,
+         adjusted_thresh=temp-temp_diff_thresh,
+         adjusted_extreme=temp-temp_diff_extreme) %>%
+  ungroup()
+
+#Plot it all, compare transformed "Blob" data with real Blob data
+ggplot(joined_df, aes(x = date_time)) +
+  geom_line(aes(y = temp, colour="temp"), size = 0.8) +
+  geom_line(aes(y = adjusted_thresh, colour="adjusted_thresh"),size = 0.8) +
+  geom_line(aes(y = adjusted_extreme, colour="adjusted_extreme"),size = 0.8) +
+  geom_smooth(aes(y=temp), method = "lm", se = F, colour = "blue4") +
+  geom_smooth(aes(y=adjusted_thresh), method = "lm", se = F, colour = "purple4") +
+  geom_smooth(aes(y=adjusted_extreme), method = "lm", se = F, colour = "blue") +
+  geom_line(aes(y = adjusted_temp, colour="adjusted_temp"), size = 0.8) +
+  geom_line(data = joined_df[!is.na(joined_df$seas), ],aes(y = seas, colour="seas"),size = 0.8) +
+  scale_colour_manual(name = "Line Colour",
+                      values = c("temp" =  "orange",
+                                 "adjusted_thresh" = "red", 
+                                 "adjusted_extreme" =  "darkred",
+                                 "adjusted_temp" =  "purple",
+                                 "seas" = "dodgerblue4"),
+                      labels= c("Transformed extreme", "Transformed climatology", "Transformed Blob", "Climatology","The Blob")) +
+  scale_x_datetime(date_labels = "%b %d",
+                   breaks = scales::date_breaks("1 week"),
+                   expand = c(0, 0),
+                   limits = c(min(joined_df$date_time),max = max(joined_df$date_time))) +
+  scale_y_continuous(limits = c(13, 27), breaks = seq(13, 27, by = 2)) +
+  guides(colour = guide_legend(override.aes = list(fill = NA))) +
+  labs(y = expression(paste("Temperature (", degree, "C)")),x = "Date") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45,vjust = 1,hjust = 1,size = 20),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.position = "top",
+        legend.title = element_blank())
+
+#ggsave(here("figures", "MHWprofile_all2.png"), width = 20, height = 7)
+
+mhw_profile_final <- joined_df %>%
+  select(date_time, chill=adjusted_temp, blob=adjusted_thresh, extreme=adjusted_extreme)
+
+write_csv(mhw_profile, here("data", "mhw_profile_final.csv"))
 ```
 
