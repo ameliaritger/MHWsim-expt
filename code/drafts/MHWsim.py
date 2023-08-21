@@ -1,12 +1,12 @@
 import glob
 import time
 import datetime
-import collections
+#mport collections
 import pandas as pd
 import Temperature as tm
 import IO_ctrl as io
 import Memory as mem
-import MHWramp as mhwr
+import MHWramp2 as mhwr
 
 # Read the CSV file and convert to dictionary
 temp_profile = pd.read_csv("mhw_profile.csv", skiprows=1, usecols=[0,1,2,3], names=["datetime", "severe", "extreme", "chill"])
@@ -79,9 +79,10 @@ decline_rate = 1.04/sampling_rate_per_day
 
 #print(severe_heatwave_temps)
 
-#Start timer
-tic = time.perf_counter() 
-toc = 0
+#Establish experimental time periods
+today = datetime.datetime.today()
+mhw_date = datetime.datetime(2023, 9, 1) #date of start of MHW
+post_mhw = datetime.datetime(2023, 10, 7) #date of start of recovery period
 
 # Initialize heaters to off in all tanks
 heater_state = 0
@@ -90,8 +91,7 @@ for i in range(len(heater_pins)):
     print(f"Heater {i} OFF")
 
 # Run the MHW simulation
-test_period = 600 # seconds, 262800*60 for 6 months 
-while toc - tic < test_period:
+while today <= mhw_date:
     for i in range(num_therm):
         if i == 0:
             current_datetime = datetime.datetime.now() #Read the current date and time
@@ -99,8 +99,8 @@ while toc - tic < test_period:
             temp_set = temp_profile[closest_datetime] #Extract the temperature values from the closest date and time
             print(f"The current temperature set points are: {temp_set}")
             chill_set = temp_set[0]
-            severe_set = temp_set[1]
-            extreme_set = temp_set[2]
+            #severe_set = temp_set[1]
+            #extreme_set = temp_set[2]
         temp_ctrl[i].load_temp() #Read temperatures on all sensors
         i_cal = device_cal[temp_ctrl[i].Name] #Get calibration values for sensor
         raw_high =  i_cal[0] #Read in high calibration value for sensor
@@ -110,19 +110,19 @@ while toc - tic < test_period:
         print(f"raw value of sensor {i} is {temp_ctrl[i].Temp}, corrected value is {corrected_value[i]}.")
         time.sleep(0.1) #sleep for x seconds
     if io_inst.heater_states[2] == 0: #If tank 0 heater is off
-        if (corrected_value[17] > chill_set): #Ambient tank conditions
-        #if (corrected_value[0] <= corrected_value[2] + severe_temp): # && (toc_value < test_period):
+        if (corrected_value[17] < chill_set): #and the tank temp is less than the temp set point
             io_inst.heat(2, 1)
             print("heater ON!")
-            time.sleep(60) #sleep for 1 minute before checking again
+            time.sleep(30) #sleep for 30 seconds before checking again
+        else:
+            print("Too hot! Need to chill.")
     else: #If tank 0 heater is on
-        if (corrected_value[17] > chill_set):
-        #if (corrected_value[0] > corrected_value[2] + severe_temp):
+        if (corrected_value[17] >= chill_set): #and the tank temp has reached the temp set point
             io_inst.heat(2, 0)
             print("heater OFF!")
-            time.sleep(60) #lseep for 1 minute before checking again
-    
-    toc = time.perf_counter() #grab current time
+            time.sleep(30) #lseep for 30 seconds before checking again
+
+    today = datetime.datetime.today()
     m.save(corrected_value) #save data to csv
     corrected_value = [] #delete the corrected value list and re-initialize a blank list
 
