@@ -50,6 +50,11 @@ device_cal = {"28-00000eb42add": [48.687, 0.25], #0
               "28-00000eb4619b": [48.812, 0.187], #15
               "28-00000eb52c32": [49.0, 0.25],
               "28-00000eb3e681": [48.937, 0.312]}
+chill_devices = [0,1,2,3,4]
+severe_devices = [5,6,7,8,9]
+extreme_devices = [10,11,12,13,14]
+all_treatments = ["chill", "severe", "extreme"]
+chill_temps, severe_temps, extreme_temps = ([] for i in range(3)) #create blank lists for each treatment
 corrected_value = []
 
 #Sensor 0, Heater 0 = Ambient
@@ -101,26 +106,51 @@ while today <= mhw_date:
             chill_set = temp_set[0]
             #severe_set = temp_set[1]
             #extreme_set = temp_set[2]
-        temp_ctrl[i].load_temp() #Read temperatures on all sensors
-        i_cal = device_cal[temp_ctrl[i].Name] #Get calibration values for sensor
-        raw_high =  i_cal[0] #Read in high calibration value for sensor
-        raw_low = i_cal[1] #Read in low calibration value for sensor
-        raw_range = raw_high - raw_low #Calculate the calibration value range
-        corrected_value.append((((temp_ctrl[i].Temp  - raw_low) * ref_range) / raw_range) + ref_low) #Calibrate sensor readings 
-        print(f"raw value of sensor {i} is {temp_ctrl[i].Temp}, corrected value is {corrected_value[i]}.")
-        time.sleep(0.1) #sleep for x seconds
     if io_inst.heater_states[2] == 0: #If tank 0 heater is off
-        if (corrected_value[17] < chill_set): #and the tank temp is less than the temp set point
+        for temp_list in range(3):
+            for device in zip(chill_devices, severe_devices, extreme_devices):
+                blank_list = []
+                temp_ctrl[device].load_temp() #Read temperatures on chill tank sensors
+                j_cal = device_cal[temp_ctrl[device].Name] #Get calibration values for sensor
+                raw_high =  j_cal[0] #Read in high calibration value for sensor
+                raw_low = j_cal[1] #Read in low calibration value for sensor
+                raw_range = raw_high - raw_low #Calculate the calibration value range
+                corrected_value.append((((temp_ctrl[device].Temp  - raw_low) * ref_range) / raw_range) + ref_low) #Calibrate sensor readings 
+                blank_list.append(corrected_value[device])
+                #print(f"{corrected_value[j]}")
+                time.sleep(0.1) #sleep for x seconds
+            avg_temp = sum(blank_list) / len(blank_list)
+            print("The average temp is {}".format(avg_temp)
+            #print(avg_cold)
+                
+        
+        #for chill in range(3): # --> HOW TO USE A DICTIONARY OR LIST OR SOMETHING? Since I'm going to do this again for the "severe" and "extreme" tanks
+            #for j in chill_devices: #is there a way to write a function for the following for loop, since I'm going to be repeating it 3 times?
+                #temp_ctrl[j].load_temp() #Read temperatures on chill tank sensors
+                #j_cal = device_cal[temp_ctrl[j].Name] #Get calibration values for sensor
+                #raw_high =  j_cal[0] #Read in high calibration value for sensor
+                #raw_low = j_cal[1] #Read in low calibration value for sensor
+                #raw_range = raw_high - raw_low #Calculate the calibration value range
+                #corrected_value.append((((temp_ctrl[j].Temp  - raw_low) * ref_range) / raw_range) + ref_low) #Calibrate sensor readings 
+                #blank_list.append(corrected_value[j])
+                #print(f"{corrected_value[j]}")
+                #time.sleep(0.1) #sleep for x seconds
+        #avg_cold = sum(blank_list) / len(blank_list)
+        #print(avg_cold)
+        
+        
+        
+    if (avg_cold < chill_set): #Chill tanks
             io_inst.heat(2, 1)
             print("heater ON!")
             time.sleep(30) #sleep for 30 seconds before checking again
         else:
             print("Too hot! Need to chill.")
     else: #If tank 0 heater is on
-        if (corrected_value[17] >= chill_set): #and the tank temp has reached the temp set point
+        if (avg_cold >= chill_set): #Chill tanks
             io_inst.heat(2, 0)
             print("heater OFF!")
-            time.sleep(30) #lseep for 30 seconds before checking again
+            time.sleep(30) #sleep for 30 seconds before checking again
 
     today = datetime.datetime.today()
     m.save(corrected_value) #save data to csv
