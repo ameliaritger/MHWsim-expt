@@ -29,8 +29,8 @@ for x in range(num_therm):                   #loop through each pair
     print(f"{device_folders[x]}")
 
 #Establish sensor calibration parameters
-ref_high = 49; #Oakley lab water bath temperature
-ref_low = 0; #ice bath temperature
+ref_high = 49 #Oakley lab water bath temperature
+ref_low = 0 #ice bath temperature
 ref_range = ref_high - ref_low
 device_cal = {"28-00000eb42add": [48.687, 0.25], #0
               "28-00000ec23ab6": [48.812, 0.125],
@@ -53,9 +53,8 @@ device_cal = {"28-00000eb42add": [48.687, 0.25], #0
 chill_devices = [0,1,2,3,4]
 severe_devices = [5,6,7,8,9]
 extreme_devices = [10,11,12,13,14]
-all_treatments = ["chill", "severe", "extreme"]
-chill_temps, severe_temps, extreme_temps = ([] for i in range(3)) #create blank lists for each treatment
-corrected_value = []
+avg_temps, chill_temps, severe_temps, extreme_temps = ([] for i in range(4)) #create blank lists for each treatment plus sensor temp correction
+avg_chill, avg_severe, avg_extreme = 0,0,0 #create variables to zero
 
 #Sensor 0, Heater 0 = Ambient
 #Sensor 1, Heater 1 = Severe
@@ -87,7 +86,7 @@ decline_rate = 1.04/sampling_rate_per_day
 #Establish experimental time periods
 today = datetime.datetime.today()
 mhw_date = datetime.datetime(2023, 9, 1) #date of start of MHW
-post_mhw = datetime.datetime(2023, 10, 7) #date of start of recovery period
+post_mhw = datetime.datetime(2023, 10, 1) #date of start of recovery period
 
 # Initialize heaters to off in all tanks
 heater_state = 0
@@ -96,7 +95,7 @@ for i in range(len(heater_pins)):
     print(f"Heater {i} OFF")
 
 # Run the MHW simulation
-while today <= mhw_date:
+while today < mhw_date:
     for i in range(num_therm):
         if i == 0:
             current_datetime = datetime.datetime.now() #Read the current date and time
@@ -104,58 +103,66 @@ while today <= mhw_date:
             temp_set = temp_profile[closest_datetime] #Extract the temperature values from the closest date and time
             print(f"The current temperature set points are: {temp_set}")
             chill_set = temp_set[0]
-            #severe_set = temp_set[1]
-            #extreme_set = temp_set[2]
-    if io_inst.heater_states[2] == 0: #If tank 0 heater is off
-        for temp_list in range(3):
-            for device in zip(chill_devices, severe_devices, extreme_devices):
-                blank_list = []
+    for temp_list in range(3):
+        for device_list in [chill_devices, severe_devices, extreme_devices]:
+            for device in device_list:
                 temp_ctrl[device].load_temp() #Read temperatures on chill tank sensors
-                j_cal = device_cal[temp_ctrl[device].Name] #Get calibration values for sensor
-                raw_high =  j_cal[0] #Read in high calibration value for sensor
-                raw_low = j_cal[1] #Read in low calibration value for sensor
+                device_cal_val = device_cal[temp_ctrl[device].Name] #Get calibration values for sensor
+                raw_high =  device_cal_val[0] #Read in high calibration value for sensor
+                raw_low = device_cal_val[1] #Read in low calibration value for sensor
                 raw_range = raw_high - raw_low #Calculate the calibration value range
-                corrected_value.append((((temp_ctrl[device].Temp  - raw_low) * ref_range) / raw_range) + ref_low) #Calibrate sensor readings 
-                blank_list.append(corrected_value[device])
-                #print(f"{corrected_value[j]}")
-                time.sleep(0.1) #sleep for x seconds
-            avg_temp = sum(blank_list) / len(blank_list)
-            print("The average temp is {}".format(avg_temp)
-            #print(avg_cold)
-                
-        
-        #for chill in range(3): # --> HOW TO USE A DICTIONARY OR LIST OR SOMETHING? Since I'm going to do this again for the "severe" and "extreme" tanks
-            #for j in chill_devices: #is there a way to write a function for the following for loop, since I'm going to be repeating it 3 times?
-                #temp_ctrl[j].load_temp() #Read temperatures on chill tank sensors
-                #j_cal = device_cal[temp_ctrl[j].Name] #Get calibration values for sensor
-                #raw_high =  j_cal[0] #Read in high calibration value for sensor
-                #raw_low = j_cal[1] #Read in low calibration value for sensor
-                #raw_range = raw_high - raw_low #Calculate the calibration value range
-                #corrected_value.append((((temp_ctrl[j].Temp  - raw_low) * ref_range) / raw_range) + ref_low) #Calibrate sensor readings 
-                #blank_list.append(corrected_value[j])
-                #print(f"{corrected_value[j]}")
-                #time.sleep(0.1) #sleep for x seconds
-        #avg_cold = sum(blank_list) / len(blank_list)
-        #print(avg_cold)
-        
-        
-        
-    if (avg_cold < chill_set): #Chill tanks
-            io_inst.heat(2, 1)
-            print("heater ON!")
-            time.sleep(30) #sleep for 30 seconds before checking again
-        else:
-            print("Too hot! Need to chill.")
+                corrected_round = round(((((temp_ctrl[device].Temp  - raw_low) * ref_range) / raw_range) + ref_low),3) #Calibrate sensor readings 
+                #corrected_value.append(corrected_round) #Save this value to the corrected_value dataframe
+                if device in chill_devices:
+                    chill_temps.append(corrected_round) #corrected_value[device])
+                elif device in severe_devices:
+                    severe_temps.append(corrected_round)
+                else:
+                    extreme_temps.append(corrected_round)
+                time.sleep(0.1) #wait for x seconds
+            if device in chill_devices:
+                avg_chill = sum(chill_temps) / len(chill_temps)
+            elif device in severe_devices:
+                avg_severe = sum(severe_temps) / len(severe_temps)
+            else:
+                avg_extreme = sum(extreme_temps) / len(extreme_temps)
+            time.sleep(1) #wait for x seconds
+    print(f"The chill tank temp average is {avg_chill}")
+    print(f"The severe tank temp average is {avg_severe}")
+    print(f"The extreme tank temp average is {avg_extreme}")
+    avg_temps = [avg_chill, avg_severe, avg_extreme]
+    if io_inst.heater_states[2] == 0: #If tank 0 heater is off
+        for avg_temp in avg_temps:
+            if avg_temp < chill_set:
+                io_inst.heat(2, 1)
+                print("heater ON!")
+            else:
+                print("Too hot! Need to chill.")
     else: #If tank 0 heater is on
-        if (avg_cold >= chill_set): #Chill tanks
-            io_inst.heat(2, 0)
-            print("heater OFF!")
-            time.sleep(30) #sleep for 30 seconds before checking again
+        for avg_temp in avg_temps:
+            if (avg_temp >= chill_set):
+                io_inst.heat(2, 0)
+                print("heater OFF!")
 
+    m.save(avg_temps) #save data to csv, --> NEED TO FIGURE OUT HOW TO AVERAGE TEMPS FROM EACH SENSOR/DEVICE AND SAVE
+    avg_temps = [] #delete the corrected value list and re-initialize a blank list
     today = datetime.datetime.today()
-    m.save(corrected_value) #save data to csv
-    corrected_value = [] #delete the corrected value list and re-initialize a blank list
+    print("saved!")
+    time.sleep(30) #wait for x seconds before checking temps again
 
+while today < post_mhw:
+    for i in range(num_therm):
+        if i == 0:
+            current_datetime = datetime.datetime.now() #Read the current date and time
+            closest_datetime = min(temp_profile.keys(), key=lambda x: abs(x - current_datetime)) #Find the date/time row in the temperature profile closest to current date and time
+            temp_set = temp_profile[closest_datetime] #Extract the temperature values from the closest date and time
+            print(f"The current temperature set points are: {temp_set}")
+            chill_set = temp_set[0]
+            severe_set = temp_set[1]
+            extreme_set = temp_set[2]
+
+
+#Finish the experiment, turn everything off!
 heater_state = 0
 for i in range(len(heater_pins)):
     io_inst.heat(i, heater_state)
