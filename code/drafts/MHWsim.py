@@ -95,7 +95,62 @@ for i in range(len(heater_pins)):
     print(f"Heater {i} OFF")
 
 # Run the MHW simulation
+#PRE MHW TIME
 while today < mhw_date:
+    current_datetime = datetime.datetime.now() #Read the current date and time
+    closest_datetime = min(temp_profile.keys(), key=lambda x: abs(x - current_datetime)) #Find the date/time row in the temperature profile closest to current date and time
+    temp_set = temp_profile[closest_datetime] #Extract the temperature values from the closest date and time
+    print(f"The current temperature set points are: {temp_set}")
+    chill_set = temp_set[0]
+    for temp_list in range(3):
+        for device_list in [chill_devices, severe_devices, extreme_devices]:
+            for device in device_list:
+                temp_ctrl[device].load_temp() #Read temperatures on chill tank sensors
+                device_cal_val = device_cal[temp_ctrl[device].Name] #Get calibration values for sensor
+                raw_high =  device_cal_val[0] #Read in high calibration value for sensor
+                raw_low = device_cal_val[1] #Read in low calibration value for sensor
+                raw_range = raw_high - raw_low #Calculate the calibration value range
+                corrected_round = round(((((temp_ctrl[device].Temp  - raw_low) * ref_range) / raw_range) + ref_low),3) #Calibrate sensor readings 
+                #corrected_value.append(corrected_round) #Save this value to the corrected_value dataframe
+                if device in chill_devices:
+                    chill_temps.append(corrected_round) #corrected_value[device])
+                elif device in severe_devices:
+                    severe_temps.append(corrected_round)
+                else:
+                    extreme_temps.append(corrected_round)
+                time.sleep(0.1) #wait for x seconds
+            if device in chill_devices:
+                avg_chill = sum(chill_temps) / len(chill_temps)
+            elif device in severe_devices:
+                avg_severe = sum(severe_temps) / len(severe_temps)
+            else:
+                avg_extreme = sum(extreme_temps) / len(extreme_temps)
+            time.sleep(1) #wait for x seconds
+    print(f"The chill tank temp average is {avg_chill}")
+    print(f"The severe tank temp average is {avg_severe}")
+    print(f"The extreme tank temp average is {avg_extreme}")
+    avg_temps = [avg_chill, avg_severe, avg_extreme]
+    for heater_num in range(3):
+        if io_inst.heater_states[heater_num] == 0: #If tank num heater is off
+            for avg_temp in avg_temps:
+                if avg_temp < chill_set:
+                    io_inst.heat(heater_num, 1)
+                    print("heater ON!")
+                else:
+                    print("Too hot! Need to chill.")
+        else: #If tank 0 heater is on
+            for avg_temp in avg_temps:
+                if (avg_temp >= chill_set):
+                    io_inst.heat(heater_num, 0)
+                    print("heater OFF!")
+    m.save(avg_temps) #save data to csv, --> NEED TO FIGURE OUT HOW TO AVERAGE TEMPS FROM EACH SENSOR/DEVICE AND SAVE IT
+    avg_temps = [] #delete the corrected value list and re-initialize a blank list
+    today = datetime.datetime.today()
+    print("saved!")
+    time.sleep(30) #wait for x seconds before checking temps again
+
+#MHW TIME
+while today < post_mhw:
     for i in range(num_therm):
         if i == 0:
             current_datetime = datetime.datetime.now() #Read the current date and time
@@ -103,6 +158,8 @@ while today < mhw_date:
             temp_set = temp_profile[closest_datetime] #Extract the temperature values from the closest date and time
             print(f"The current temperature set points are: {temp_set}")
             chill_set = temp_set[0]
+            severe_set = temp_set[1]
+            extreme_set = temp_set[2]
     for temp_list in range(3):
         for device_list in [chill_devices, severe_devices, extreme_devices]:
             for device in device_list:
@@ -143,25 +200,8 @@ while today < mhw_date:
             if (avg_temp >= chill_set):
                 io_inst.heat(2, 0)
                 print("heater OFF!")
-
-    m.save(avg_temps) #save data to csv, --> NEED TO FIGURE OUT HOW TO AVERAGE TEMPS FROM EACH SENSOR/DEVICE AND SAVE
-    avg_temps = [] #delete the corrected value list and re-initialize a blank list
-    today = datetime.datetime.today()
-    print("saved!")
-    time.sleep(30) #wait for x seconds before checking temps again
-
-while today < post_mhw:
-    for i in range(num_therm):
-        if i == 0:
-            current_datetime = datetime.datetime.now() #Read the current date and time
-            closest_datetime = min(temp_profile.keys(), key=lambda x: abs(x - current_datetime)) #Find the date/time row in the temperature profile closest to current date and time
-            temp_set = temp_profile[closest_datetime] #Extract the temperature values from the closest date and time
-            print(f"The current temperature set points are: {temp_set}")
-            chill_set = temp_set[0]
-            severe_set = temp_set[1]
-            extreme_set = temp_set[2]
-
-
+    
+    
 #Finish the experiment, turn everything off!
 heater_state = 0
 for i in range(len(heater_pins)):
