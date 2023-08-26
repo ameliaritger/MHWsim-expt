@@ -14,7 +14,7 @@ class MEM(object):
 
         self.dt = datetime.datetime #use this module for getting the date/time
 
-        self.file_name = "data" + str(self.dt.now()) + ".csv" #construct csv file name using datetime so it is always unique
+        self.file_name = str(self.dt.now()) + ".csv" #construct csv file name using datetime so it is always unique
         self.external_file_name = self.external_path + self.file_name #append to external path
 
         self.external_file = open(self.external_file_name, 'a');
