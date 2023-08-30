@@ -2,6 +2,7 @@ import glob
 import time
 import datetime
 import pandas as pd
+import numpy as np
 import Temperature as tm
 import IO_ctrl as io
 import Memory as mem
@@ -49,18 +50,18 @@ device_cal = {"28-00000eb42add": [48.687, 0.25], #0
               "28-00000eb3e681": [48.937, 0.312]}
 
 #Establish temperature sensor locations
-chill_devices = [0,1,2,3,4,]
-severe_devices = [5,6,7,8,9]
-extreme_devices = [10,11,12,13,14]
-sump_devices = [15, 16, 17]
+chill_devices = [1,2,7,8,9]
+severe_devices = [5,6,0,11,3]
+extreme_devices = [10,4,12,13,15]
+sump_devices = [14, 16, 17]
 
 #Iniitialize lists and variables
-avg_temps, chill_temps, severe_temps, extreme_temps = ([] for i in range(4)) #initialize blank lists for each treatment plus sensor temp correction
-avg_chill, avg_severe, avg_extreme, chill_set, severe_set, extreme_set = [0 for i in range(6)] #initialize variables set to zero
+avg_temps, all_temps_avg = ([] for i in range(2)) #initialize blank list for each treatment plus sensor temp correction
+chill_set, severe_set, extreme_set = [0 for i in range(3)] #initialize variables set to zero
 
 #Initialize sleep times
-sleep_measure = 5 #number of seconds to sleep between sampling (interval)
-sleep_repeat = 1 #number of seconds to sleep between repeated temperature measurements
+sleep_measure = 1 #number of seconds to sleep between sampling (interval)
+sleep_repeat = 0.1 #number of seconds to sleep between repeated temperature measurements
 sleep_process = 0.1 #number of seconds to sleep between ever sensor reading (to allow processor to catch up)
 
 #Initialize MHW parameters
@@ -92,71 +93,41 @@ while today < mhw_date:
         temp_set = temp_profile[closest_datetime] #Extract the temperature values from the closest date and time
         print(f"The current temperature set points are: {temp_set}")
         chill_set = temp_set[0]
-        empty_list = [[0 for i in range(5)] for j in range(3)]
-        empty_sump = [[0 for i in range(3)] for j in range(3)]
-        chill_df = pd.DataFrame(empty_list, columns = chill_devices)
-        severe_df = pd.DataFrame(empty_list, columns = severe_devices)
-        extreme_df = pd.DataFrame(empty_list, columns = extreme_devices)
-        sump_df = pd.DataFrame(empty_sump, columns = sump_devices)
-        for i in range(3):
-            for device_list in [chill_devices, severe_devices, extreme_devices, sump_devices]:
-                for device in device_list:
-                    temp_ctrl[device].load_temp() #Read temperatures on chill tank sensors
-                    device_cal_val = device_cal[temp_ctrl[device].Name] #Get calibration values for sensor
-                    raw_high =  device_cal_val[0] #Read in high calibration value for sensor
-                    raw_low = device_cal_val[1] #Read in low calibration value for sensor
-                    raw_range = raw_high - raw_low #Calculate the calibration value range
-                    corrected_round = round(((((temp_ctrl[device].Temp  - raw_low) * ref_range) / raw_range) + ref_low),3) #Calibrate sensor readings 
-                    if device in chill_devices:
-                        chill_temps.append(corrected_round) #corrected_value[device])
-                        for col in chill_df.columns:
-                            if col == device:
-                                chill_df.loc[i, col] = corrected_round
-                    elif device in severe_devices:
-                        severe_temps.append(corrected_round)
-                        for col in severe_df.columns:
-                            if col == device:
-                                severe_df.loc[i, col] = corrected_round
-                    elif device in extreme_devices:
-                        extreme_temps.append(corrected_round)
-                        for col in extreme_df.columns:
-                            if col == device:
-                                extreme_df.loc[i, col] = corrected_round
-                    else:
-                        for col in sump_df.columns:
-                            if col == device:
-                                sump_df.loc[i, col] = corrected_round
-                    time.sleep(sleep_process)
-                if device in chill_devices:
-                    avg_chill = sum(chill_temps) / len(chill_temps)
-                elif device in severe_devices:
-                    avg_severe = sum(severe_temps) / len(severe_temps)
-                else:
-                    avg_extreme = sum(extreme_temps) / len(extreme_temps)
-                time.sleep(sleep_repeat)
+        all_temps_df = pd.DataFrame(0, index = np.arange(3), columns = pd.MultiIndex.from_tuples([("chill_devices", x) for x in chill_devices] + [("severe_devices", x) for x in severe_devices] + [("extreme_devices", x) for x in extreme_devices] + [("sump_devices", x) for x in sump_devices], names=["treatment", "measurement"]))
+        for i in range(3):  
+            for treatment, device in all_temps_df.columns:
+                temp_ctrl[device].load_temp() #Read temperatures on chill tank sensors
+                device_cal_val = device_cal[temp_ctrl[device].Name] #Get calibration values for sensor
+                raw_high =  device_cal_val[0] #Read in high calibration value for sensor
+                raw_low = device_cal_val[1] #Read in low calibration value for sensor
+                raw_range = raw_high - raw_low #Calculate the calibration value range
+                corrected_round = round(((((temp_ctrl[device].Temp  - raw_low) * ref_range) / raw_range) + ref_low),3) #Calibrate sensor readings 
+                all_temps_df.iloc[(i, device)] = corrected_round
+                time.sleep(sleep_process)
+            time.sleep(sleep_repeat)
+        avg_chill = all_temps_df["chill_devices"].mean().mean()
+        avg_severe = all_temps_df["severe_devices"].mean().mean()
+        avg_extreme = all_temps_df["extreme_devices"].mean().mean()
         print(f"The chill tank temp average is {avg_chill}")
         print(f"The severe tank temp average is {avg_severe}")
         print(f"The extreme tank temp average is {avg_extreme}")
-        avg_temps = [avg_chill, avg_severe, avg_extreme] #---> WHEN I PUT THIS OUTSIDE BEFORE FOR LOOP, VALUES DID NOT UPDATE (stayed 0) - WHY?
-        heater_dict = {} #initialize blank heater dictionary to fill in following for loop
-        for heater_num in range(len(avg_temps)):
-            heater_dict[heater_num] = (avg_temps[heater_num], chill_set) #fill in the dictionary with average temps and set temps
-        for heater_num, expt_temps in heater_dict.items():
-            if io_inst.heater_states[heater_num] == 0: #If tank heater is off
-                if expt_temps[0] < expt_temps[1]:
-                    io_inst.heat(heater_num, 1)
-                    print(f"Sump tank {heater_num} heater ON!")
+        avg_temps = [avg_chill, avg_severe, avg_extreme]
+        for index_num in range(len(heater_pins)):
+            if io_inst.heater_states[index_num] == 0: #If tank heater is off
+                if avg_temps[index_num] < chill_set:
+                    io_inst.heat(index_num, 1)
+                    print(f"Sump tank {index_num} heater ON!")
                 else:
-                    print(f"Sump tank {heater_num} too hot! Need to chill.")
+                    print(f"Sump tank {index_num} too hot! Need to chill.")
             else: #If tank heater is on
-                if expt_temps[0] >= expt_temps[1]:
-                    io_inst.heat(heater_num, 0)
-                    print(f"Sump tank {heater_num} heater OFF!")
-        all_temps = pd.concat([chill_df, severe_df, extreme_df, sump_df], axis=1)
-        all_temps_avg = all_temps.mean(axis=0).tolist()
+                if avg_temps[index_num] >= chill_set:
+                    io_inst.heat(index_num, 0)
+                    print(f"Sump tank {index_num} heater OFF!")
+        all_temps_sorted = all_temps_df.sort_index(level=1, axis=1) #put columns in numerical order
+        all_temps_avg = all_temps_sorted.mean(axis=0).tolist() #create a list of the mean average temps for each sensor
         m.save(all_temps_avg) #save data to csv
         print(f"Temperatures saved, going to sleep for {sleep_measure} seconds...")
-        all_temps_avg = [] #delete the corrected list of all temps and re-initialize a blank list
+        all_temps_avg = [] #delete the corrected list of all temps by re-initializing a blank list
         time.sleep(sleep_measure)
         today = datetime.datetime.today() #check the current date
     else:
