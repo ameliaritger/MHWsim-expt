@@ -2,7 +2,6 @@ import glob
 import time
 import datetime
 import pandas as pd
-import numpy as np
 import Temperature as tm
 import IO_ctrl as io
 import Memory as mem
@@ -17,37 +16,26 @@ temp_profile["datetime"] = temp_profile["datetime"].dt.tz_localize(None) #Remove
 temp_profile = dict([(i,[x,y,z]) for i,x,y,z in zip(temp_profile["datetime"], temp_profile["chill"], temp_profile["severe"],temp_profile["extreme"])])
     
 m = mem.MEM("./local/","./external/") #storage locations on RPi
-base_dir = '/sys/bus/w1/devices/'            #directory where thermistor files are populated
-device_folders = glob.glob(base_dir + '28*') #get list of all thermistor folders
 
 #Initialize temperature sensors
+base_dir = '/sys/bus/w1/devices/'            #directory where thermistor files are populated
+device_folders = glob.glob(base_dir + '28*') #get list of all thermistor folders
 temp_ctrl = []                               #create empty list that we will populate with thermistor controllers
 num_therm = len(device_folders)              #calculate the number of thermistor pairs
 print(f"The number of thermistors detected by RPi: {num_therm}")
-for x in range(num_therm):                   #loop through each pair
-    ctrl = tm.TEMP(device_folders[x])        #create thermistor controller for a single pair
+for index_num in range(num_therm):                   #loop through each pair
+    ctrl = tm.TEMP(device_folders[index_num])        #create thermistor controller for a single pair
     temp_ctrl.append(ctrl)                   #add that thermistor controller to the list
-
-#Read in temperature sensor locations
-chill_devices = sinfo.chill_devices
-severe_devices = sinfo.severe_devices
-extreme_devices = sinfo.extreme_devices
-sump_devices = sinfo.sump_devices
 
 #Initialize variables and lists
 chill_set, severe_set, extreme_set = [0 for i in range(3)] #initialize variables set to zero
 temp_sets = ([] for i in range(1)) #initialize blank list for treatment temperature set points
 
-#Initialize sleep times
 sleep_measure = 1 #number of seconds to sleep between sampling (interval)
 sleep_repeat = 0.1 #number of seconds to sleep between repeated temperature measurements
-
-#Initialize MHW parameters
-severe_thresh = 4
-extreme_thresh = 8
-
-#Establish experimental time periods
-today = datetime.datetime.today()
+severe_thresh = 4 #initialize severe MHW parameter
+extreme_thresh = 8 #initialize extreme MHW parameter
+today = datetime.datetime.today() #date and time for today
 mhw_date = datetime.datetime(2023, 9, 1) #date of start of MHW
 post_mhw = datetime.datetime(2023, 10, 1) #date of start of recovery period
 
@@ -126,7 +114,7 @@ while today < post_mhw:
         time.sleep(sleep_repeat)
         
 #RECOVERY TIME
-start_ramp = time.perf_counter() #DO I NEED TO RE-INIT START_RAMP HERE?
+start_ramp = time.perf_counter()
 while today >= post_mhw:
     current_datetime = datetime.datetime.now() #Read the current date and time
     if current_datetime.second % 30 == 00: #run script on the 30 seconds or 00 seconds mark
