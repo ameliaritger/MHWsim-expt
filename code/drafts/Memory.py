@@ -1,5 +1,6 @@
 import glob
 import datetime
+import SensorInfo as sinfo
 
 class MEM(object):
     def __init__(self, device_folder, external_path):
@@ -20,8 +21,9 @@ class MEM(object):
         self.external_file = open(self.external_file_name, 'a');
         #write header to file
         header = ['Timestamp']
-        for i in range(num_therm):
-            header.append('Sensor ' + str(i))
+        for device_list in [sinfo.chill_devices, sinfo.severe_devices, sinfo.extreme_devices, sinfo.sump_devices]:
+            for device in device_list:
+                header.append(device)
         self.external_file.write(',' .join(header) + ',' + '\n')
         self.external_file.close()
 

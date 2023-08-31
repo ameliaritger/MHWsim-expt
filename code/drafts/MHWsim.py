@@ -1,11 +1,14 @@
 import glob
 import time
 import datetime
+import pandas as pd
+import numpy as np
 import Temperature as tm
 import IO_ctrl as io
 import Memory as mem
 import MHWRamp as mhwr
 import SensorAverage as savg
+import SensorInfo as sinfo
 
 # Read the CSV file and convert to dictionary
 temp_profile = pd.read_csv("mhw_profile.csv", skiprows=1, usecols=[0,1,2,3], names=["datetime", "severe", "extreme", "chill"])
@@ -25,13 +28,15 @@ for x in range(num_therm):                   #loop through each pair
     ctrl = tm.TEMP(device_folders[x])        #create thermistor controller for a single pair
     temp_ctrl.append(ctrl)                   #add that thermistor controller to the list
 
-#Establish temperature sensor locations
-chill_devices = [1,2,7,8,9]
-severe_devices = [5,6,0,11,3]
-extreme_devices = [10,4,12,13,15]
-sump_devices = [14, 16, 17]
+#Read in temperature sensor locations
+chill_devices = sinfo.chill_devices
+severe_devices = sinfo.severe_devices
+extreme_devices = sinfo.extreme_devices
+sump_devices = sinfo.sump_devices
 
+#Initialize variables and lists
 chill_set, severe_set, extreme_set = [0 for i in range(3)] #initialize variables set to zero
+temp_sets = ([] for i in range(1)) #initialize blank list for treatment temperature set points
 
 #Initialize sleep times
 sleep_measure = 1 #number of seconds to sleep between sampling (interval)
@@ -66,7 +71,7 @@ while today < mhw_date:
         temp_set = temp_profile[closest_datetime] #Extract the temperature values from the closest date and time
         print(f"The current temperature set points are: {temp_set}")
         chill_set = temp_set[0]
-        all_temps_df, all_temps_avg, avg_temps = savg.get_avg_temp(chill_devices, severe_devices, extreme_devices, sump_devices, temp_ctrl, sleep_repeat)
+        avg_temps_all, avg_temps = savg.get_avg_temp(temp_ctrl, sleep_repeat)
         for index_num in range(len(heater_pins)):
             if io_inst.heater_states[index_num] == 0: #If tank heater is off
                 if avg_temps[index_num] < chill_set:
@@ -78,9 +83,9 @@ while today < mhw_date:
                 if avg_temps[index_num] >= chill_set:
                     io_inst.heat(index_num, 0)
                     print(f"Sump tank {index_num} heater OFF!")
-        m.save(all_temps_avg) #save data to csv
+        m.save(avg_temps_all) #save data to csv
         print(f"Temperatures saved, going to sleep for {sleep_measure} seconds...")
-        all_temps_avg = [] #delete the corrected list of all temps by re-initializing a blank list
+        avg_temps_all = [] #delete the corrected list of all temps by re-initializing a blank list
         time.sleep(sleep_measure)
         today = datetime.datetime.today() #check the current date
     else:
@@ -99,74 +104,24 @@ while today < post_mhw:
         chill_set = temp_set[0]
         severe_set = temp_set[0] + delta_severe
         extreme_set = temp_set[0] + delta_extreme
-        set_temps = [chill_set, severe_set, extreme_set]
-        empty_list = [[0 for i in range(5)] for j in range(3)]
-        empty_sump = [[0 for i in range(3)] for j in range(3)]
-        chill_df = pd.DataFrame(empty_list, columns = chill_devices)
-        severe_df = pd.DataFrame(empty_list, columns = severe_devices)
-        extreme_df = pd.DataFrame(empty_list, columns = extreme_devices)
-        sump_df = pd.DataFrame(empty_sump, columns = sump_devices)
-        for i in range(3):
-            for device_list in [chill_devices, severe_devices, extreme_devices, sump_devices]:
-                for device in device_list:
-                    temp_ctrl[device].load_temp() #Read temperatures on chill tank sensors
-                    device_cal_val = device_cal[temp_ctrl[device].Name] #Get calibration values for sensor
-                    raw_high =  device_cal_val[0] #Read in high calibration value for sensor
-                    raw_low = device_cal_val[1] #Read in low calibration value for sensor
-                    raw_range = raw_high - raw_low #Calculate the calibration value range
-                    corrected_round = round(((((temp_ctrl[device].Temp  - raw_low) * ref_range) / raw_range) + ref_low),3) #Calibrate sensor readings
-                    if device in chill_devices:
-                        chill_temps.append(corrected_round) #corrected_value[device])
-                        for col in chill_df.columns:
-                            if col == device:
-                                chill_df.loc[i, col] = corrected_round
-                    elif device in severe_devices:
-                        severe_temps.append(corrected_round)
-                        for col in severe_df.columns:
-                            if col == device:
-                                severe_df.loc[i, col] = corrected_round
-                    elif device in extreme_devices:
-                        extreme_temps.append(corrected_round)
-                        for col in extreme_df.columns:
-                            if col == device:
-                                extreme_df.loc[i, col] = corrected_round
-                    else:
-                        for col in sump_df.columns:
-                            if col == device:
-                                sump_df.loc[i, col] = corrected_round
-                    time.sleep(sleep_process) 
-                if device in chill_devices:
-                    avg_chill = sum(chill_temps) / len(chill_temps)
-                elif device in severe_devices:
-                    avg_severe = sum(severe_temps) / len(severe_temps)
+        temp_sets = [chill_set, severe_set, extreme_set]
+        avg_temps_all, avg_temps = savg.get_avg_temp(temp_ctrl, sleep_repeat)
+        for index_num in range(len(heater_pins)):
+            if io_inst.heater_states[index_num] == 0: #If tank heater is off
+                if avg_temps[index_num] < temp_sets[index_num]:
+                    io_inst.heat(index_num, 1)
+                    print(f"Sump tank {index_num} heater ON!")
                 else:
-                    avg_extreme = sum(extreme_temps) / len(extreme_temps)
-                time.sleep(sleep_repeat)
-        print(f"The chill tank temp average is {avg_chill}")
-        print(f"The severe tank temp average is {avg_severe}")
-        print(f"The extreme tank temp average is {avg_extreme}")
-        avg_temps = [avg_chill, avg_severe, avg_extreme]
-        heater_dict = {} #initialize blank heater dictionary to fill in following for loop
-        for heater_num in range(len(avg_temps)):
-            heater_dict[heater_num] = (avg_temps[heater_num], set_temps[heater_num]) #fill in the dictionary with average temps and set temps
-        for heater_num, expt_temps in heater_dict.items():
-            if io_inst.heater_states[heater_num] == 0: #If tank heater is off
-                if expt_temps[0] < expt_temps[1]:
-                    io_inst.heat(heater_num, 1)
-                    print(f"Sump tank {heater_num} heater ON!")
-                else:
-                    print(f"Sump tank {heater_num} too hot! Need to chill.")
+                    print(f"Sump tank {index_num} too hot! Need to chill.")
             else: #If tank heater is on
-                if expt_temps[0] >= expt_temps[1]:
-                    io_inst.heat(heater_num, 0)
-                    print(f"Sump tank {heater_num} heater OFF!")
-        all_temps = pd.concat([chill_df, severe_df, extreme_df, sump_df], axis=1)
-        all_temps_avg = all_temps.mean(axis=0).tolist()
-        m.save(all_temps_avg) #save data to csv
+                if avg_temps[index_num] >= temp_sets[index_num]:
+                    io_inst.heat(index_num, 0)
+                    print(f"Sump tank {index_num} heater OFF!")
+        m.save(avg_temps_all) #save data to csv
         print(f"Temperatures saved, going to sleep for {sleep_measure} seconds...")
-        all_temps_avg = [] #delete the corrected list of all temps and re-initialize a blank list
+        avg_temps_all = [] #delete the corrected list of all temps by re-initializing a blank list
         time.sleep(sleep_measure)
-        today = datetime.datetime.today() #check the current date
+        today = datetime.datetime.today() #check the current date                    
     else:
         time.sleep(sleep_repeat)
         
@@ -183,84 +138,32 @@ while today >= post_mhw:
         chill_set = temp_set[0]
         severe_set = temp_set[0] + delta_severe
         extreme_set = temp_set[0] + delta_extreme
-        set_temps = [chill_set, severe_set, extreme_set]
-        empty_list = [[0 for i in range(5)] for j in range(3)]
-        empty_sump = [[0 for i in range(3)] for j in range(3)]
-        chill_df = pd.DataFrame(empty_list, columns = chill_devices)
-        severe_df = pd.DataFrame(empty_list, columns = severe_devices)
-        extreme_df = pd.DataFrame(empty_list, columns = extreme_devices)
-        sump_df = pd.DataFrame(empty_sump, columns = sump_devices)
-        for i in range(3):
-            for device_list in [chill_devices, severe_devices, extreme_devices, sump_devices]:
-                for device in device_list:
-                    temp_ctrl[device].load_temp() #Read temperatures on chill tank sensors
-                    device_cal_val = device_cal[temp_ctrl[device].Name] #Get calibration values for sensor
-                    raw_high =  device_cal_val[0] #Read in high calibration value for sensor
-                    raw_low = device_cal_val[1] #Read in low calibration value for sensor
-                    raw_range = raw_high - raw_low #Calculate the calibration value range
-                    corrected_round = round(((((temp_ctrl[device].Temp  - raw_low) * ref_range) / raw_range) + ref_low),3) #Calibrate sensor readings
-                    if device in chill_devices:
-                        chill_temps.append(corrected_round) #corrected_value[device])
-                        for col in chill_df.columns:
-                            if col == device:
-                                chill_df.loc[i, col] = corrected_round
-                    elif device in severe_devices:
-                        severe_temps.append(corrected_round)
-                        for col in severe_df.columns:
-                            if col == device:
-                                severe_df.loc[i, col] = corrected_round
-                    elif device in extreme_devices:
-                        extreme_temps.append(corrected_round)
-                        for col in extreme_df.columns:
-                            if col == device:
-                                extreme_df.loc[i, col] = corrected_round
-                    else:
-                        for col in sump_df.columns:
-                            if col == device:
-                                sump_df.loc[i, col] = corrected_round
-                    time.sleep(sleep_process)
-                if device in chill_devices:
-                    avg_chill = sum(chill_temps) / len(chill_temps)
-                elif device in severe_devices:
-                    avg_severe = sum(severe_temps) / len(severe_temps)
+        temp_sets = [chill_set, severe_set, extreme_set]
+        avg_temps_all, avg_temps = savg.get_avg_temp(temp_ctrl, sleep_repeat)
+        for index_num in range(len(heater_pins)):
+            if io_inst.heater_states[index_num] == 0: #If tank heater is off
+                if avg_temps[index_num] < temp_sets[index_num]:
+                    io_inst.heat(index_num, 1)
+                    print(f"Sump tank {index_num} heater ON!")
                 else:
-                    avg_extreme = sum(extreme_temps) / len(extreme_temps)
-                time.sleep(sleep_repeat)
-        print(f"The chill tank temp average is {avg_chill}")
-        print(f"The severe tank temp average is {avg_severe}")
-        print(f"The extreme tank temp average is {avg_extreme}")
-        avg_temps = [avg_chill, avg_severe, avg_extreme]
-        heater_dict = {} #initialize blank heater dictionary to fill in following for loop -> CHECK I EVEN NEED THIS WITH DF
-        for heater_num in range(len(avg_temps)):
-            heater_dict[heater_num] = (avg_temps[heater_num], set_temps[heater_num]) #fill in the dictionary with average temps and set temps
-        for heater_num, expt_temps in heater_dict.items():
-            if io_inst.heater_states[heater_num] == 0: #If tank heater is off
-                if expt_temps[0] < expt_temps[1]:
-                    io_inst.heat(heater_num, 1)
-                    print(f"Sump tank {heater_num} heater ON!")
-                else:
-                    print(f"Sump tank {heater_num} too hot! Need to chill.")
+                    print(f"Sump tank {index_num} too hot! Need to chill.")
             else: #If tank heater is on
-                if expt_temps[0] >= expt_temps[1]:
-                    io_inst.heat(heater_num, 0)
-                    print(f"Sump tank {heater_num} heater OFF!")
-                else:
-                    print(f"Sump tank {heater_num} heater already on, staying ON!")
-        all_temps = pd.concat([chill_df, severe_df, extreme_df, sump_df], axis=1)
-        all_temps_avg = all_temps.mean(axis=0).tolist()
-        m.save(all_temps_avg) #save data to csv
+                if avg_temps[index_num] >= temp_sets[index_num]:
+                    io_inst.heat(index_num, 0)
+                    print(f"Sump tank {index_num} heater OFF!")
+        m.save(avg_temps_all) #save data to csv
         print(f"Temperatures saved, going to sleep for {sleep_measure} seconds...")
-        all_temps_avg = [] #delete the corrected list of all temps and re-initialize a blank list
+        avg_temps_all = [] #delete the corrected list of all temps by re-initializing a blank list
         time.sleep(sleep_measure)
-        today = datetime.datetime.today() #check the current date
+        today = datetime.datetime.today() #check the current date                    
     else:
         time.sleep(sleep_repeat)
         
 ###################################################
 #Finish the experiment, turn everything off!
 heater_state = 0
-for i in range(len(heater_pins)):
-    io_inst.heat(i, heater_state)
-    print(f"Heater {i} TOTALLY OFF")
+for heater_num in range(len(heater_pins)):
+    io_inst.heat(heater_num, heater_state)
+    print(f"Heater {heater_num} TOTALLY OFF")
 
 io_inst.cleanup() #cleanup
