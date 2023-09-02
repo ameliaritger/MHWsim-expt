@@ -8,6 +8,7 @@ import Memory as mem
 import MHWRamp as mhwr
 import SensorAverage as savg
 import SensorInfo as sinfo
+import CleanUp as clean
 
 # Read the CSV file and convert to dictionary
 temp_profile = pd.read_csv("mhw_profile.csv", skiprows=1, usecols=[0,1,2,3], names=["datetime", "severe", "extreme", "chill"])
@@ -31,7 +32,6 @@ for index_num in range(num_therm):                   #loop through each pair
 chill_set, severe_set, extreme_set = [0 for i in range(3)] #initialize variables set to zero
 temp_sets = ([] for i in range(1)) #initialize blank list for treatment temperature set points
 
-sleep_measure = 1 #number of seconds to sleep between sampling (interval)
 sleep_repeat = 0.1 #number of seconds to sleep between repeated temperature measurements
 severe_thresh = 4 #initialize severe MHW parameter
 extreme_thresh = 8 #initialize extreme MHW parameter
@@ -71,11 +71,9 @@ while today < mhw_date:
                 if avg_temps[index_num] >= chill_set:
                     io_inst.heat(index_num, 0)
                     print(f"Sump tank {index_num} heater OFF!")
-        m.save(avg_temps_all) #save data to csv
-        print(f"Temperatures saved, going to sleep for {sleep_measure} seconds...")
-        avg_temps_all = [] #delete the corrected list of all temps by re-initializing a blank list
-        time.sleep(sleep_measure)
-        today = datetime.datetime.today() #check the current date
+                else:
+                    print(f"Sump tank {index_num} heater staying on!")
+        avg_temps_all, today = clean.save_and_sleep(m, temp_set, avg_temps_all) 
     else:
         time.sleep(sleep_repeat)
 
@@ -105,11 +103,7 @@ while today < post_mhw:
                 if avg_temps[index_num] >= temp_sets[index_num]:
                     io_inst.heat(index_num, 0)
                     print(f"Sump tank {index_num} heater OFF!")
-        m.save(avg_temps_all) #save data to csv
-        print(f"Temperatures saved, going to sleep for {sleep_measure} seconds...")
-        avg_temps_all = [] #delete the corrected list of all temps by re-initializing a blank list
-        time.sleep(sleep_measure)
-        today = datetime.datetime.today() #check the current date                    
+        avg_temps_all, today = clean.save_and_sleep(m, temp_set, avg_temps_all)                    
     else:
         time.sleep(sleep_repeat)
         
@@ -139,11 +133,7 @@ while today >= post_mhw:
                 if avg_temps[index_num] >= temp_sets[index_num]:
                     io_inst.heat(index_num, 0)
                     print(f"Sump tank {index_num} heater OFF!")
-        m.save(avg_temps_all) #save data to csv
-        print(f"Temperatures saved, going to sleep for {sleep_measure} seconds...")
-        avg_temps_all = [] #delete the corrected list of all temps by re-initializing a blank list
-        time.sleep(sleep_measure)
-        today = datetime.datetime.today() #check the current date                    
+        avg_temps_all, today = clean.save_and_sleep(m, temp_set, avg_temps_all)                   
     else:
         time.sleep(sleep_repeat)
         
