@@ -1,8 +1,8 @@
 #Establish temperature sensor locations
 chill_devices = ["28-00000eb5045f","28-00000eb3fd89","28-00000eb42add","28-00000eb51050","28-00000eb4cb62"]
-severe_devices = ["28-00000eb4a798","28-00000ec23ab6","28-00000eb501b0","28-00000eb496d2","28-00000eb50e10"]
-extreme_devices = ["28-00000eb4b7e0","28-00000ec25534","28-00000ec24f93","28-00000eb3cf7d","28-00000eb4619b"]
-sump_devices = ["28-00000eb3f54e", "28-00000eb52c32", "28-00000eb3e681"]
+severe_devices = ["28-00000eb50e10","28-00000eb501b0", "28-00000eb496d2", "28-00000eb3cf7d", "28-00000eb52c32"]
+extreme_devices = ["28-00000ec23ab6","28-00000ec25534","28-00000eb4b7e0", "28-00000ec24f93", "28-00000eb4619b"]
+sump_devices = ["28-00000eb3f54e", "28-00000eb4a798", "28-00000eb3e681"]
 
 #Establish temperature sensor calibration parameters
 ref_high = 49 #Oakley lab water bath temperature
