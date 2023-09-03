@@ -1,8 +1,7 @@
 import time
 import CleanUp as clean
 
-wait_time = time.perf_counter()
-now = time.perf_counter()
+wait_time = 0
 
 class TEMP(object):
     def __init__(self, device_folder):
@@ -11,7 +10,7 @@ class TEMP(object):
         self.Temp = []
 
     def load_temp(self): #unnecessary, from when there were two thermistors per tank
-        self.Temp = self.read_temp(self.Probe)
+        self.Temp = self.read_temp(self.Probe) #NOT NEEDED! :)
         return self.Temp
 
     # https://www.circuitbasics.com/raspberry-pi-ds18b20-temperature-sensor-tutorial/
@@ -31,22 +30,22 @@ class TEMP(object):
             if equals_pos != -1:
                 temp_string = lines[1][equals_pos+2:]
                 temp_c = float(temp_string)/1000.0
-                now = time.perf_counter()
                 return temp_c
         except:
             temp_c = float(-1)
+            print("thermistor failure")
             now = time.perf_counter()
             if now > wait_time:
                 clean.send_email()
                 wait_time = now+5*60
             return temp_c
-        
+"""   
 def read_temp_raw(device_file):
     f = open(device_file, 'r')
     lines = f.readlines()
     f.close
     return lines
-    
+
 def read_temp(device_file):
     try:
         lines = read_temp_raw(device_file)
@@ -65,3 +64,4 @@ def read_temp(device_file):
             clean.send_email()
             wait_time = now+5*60
         return temp_c
+"""
