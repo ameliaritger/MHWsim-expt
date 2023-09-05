@@ -1,5 +1,5 @@
 import MHWsim as sim
-import CleanUp as clean
+import Alert
 import time
 
 if __name__ == "__main__":
@@ -8,6 +8,6 @@ if __name__ == "__main__":
             sim.mhw_sim()
             break #stop the program once everything has run
         except:
-            clean.send_email() #email amelia
+            Alert.send_email() #email amelia
             print("there's an issue!")
             time.sleep(2*60) #wait 2 minutes before starting the program over

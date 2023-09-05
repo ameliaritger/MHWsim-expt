@@ -21,9 +21,9 @@ def get_avg_temp(temp_ctrl, sleep_repeat):
             raw_high =  device_cal_val[0] #Read in high calibration value for sensor
             raw_low = device_cal_val[1] #Read in low calibration value for sensor
             raw_range = raw_high - raw_low #Calculate the calibration value range
-            corrected_round = round(((((temp_ctrl[index].Temp  - raw_low) * sinfo.ref_range) / raw_range) + sinfo.ref_low),3) #Calibrate sensor readings
+            calibrated_val = (((temp_ctrl[index].Temp  - raw_low) * sinfo.ref_range) / raw_range) + sinfo.ref_low #Calibrate sensor readings
             matching_cell = all_temps_df.columns.get_loc(temp_ctrl[index].Name)
-            all_temps_df.iloc[(number_of_rows, matching_cell)] = corrected_round
+            all_temps_df.iloc[(number_of_rows, matching_cell)] = calibrated_val
             time.sleep(sleep_process)
         time.sleep(sleep_repeat)
     avg_chill = all_temps_df[all_temps_df.columns.intersection(sinfo.chill_devices)].mean().mean()
@@ -33,6 +33,6 @@ def get_avg_temp(temp_ctrl, sleep_repeat):
     print(f"The severe tank temp average is {avg_severe}")
     print(f"The extreme tank temp average is {avg_extreme}")
     avg_temps = [avg_chill, avg_severe, avg_extreme] #create list of average temperatures for each treatment
-    all_temps = all_temps_df.mean(axis=0).tolist() #create a list of the mean average temps for each sensor
+    all_temps = all_temps_df.mean(axis=0).apply(lambda x: round(x,3)).tolist() #create a list of the mean average temps for each sensor, rounded to 3 digits
 
     return all_temps, avg_temps

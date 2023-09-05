@@ -57,8 +57,8 @@ def mhw_sim():
             closest_datetime = min(temp_profile.keys(), key=lambda x: abs(x - current_datetime)) #Find the date/time row in the temperature profile closest to current date and time
             temp_set = temp_profile[closest_datetime] #Extract the temperature values from the closest date and time
             print(f"The current temperature set points are: {temp_set}")
-            chill_set = temp_set[0]
             avg_temps_all, avg_temps = savg.get_avg_temp(temp_ctrl, sleep_repeat)
+            chill_set = temp_set[0]
             for index_num in range(len(heater_pins)):
                 if io_inst.heater_states[index_num] == 0: #If tank heater is off
                     if avg_temps[index_num] < chill_set:
@@ -79,7 +79,7 @@ def mhw_sim():
             avg_temps_all, heater_status, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all) 
         else:
             time.sleep(sleep_repeat)
-
+####################################
     start_ramp = time.perf_counter()
     while today < post_mhw:
         current_datetime = datetime.datetime.now() #Read the current date and time
@@ -89,11 +89,18 @@ def mhw_sim():
             print(f"The current temperature set points are: {temp_set}")
             delta_severe = mhwr.ramp_up(severe_thresh, start_ramp)
             delta_extreme = mhwr.ramp_up(extreme_thresh, start_ramp)
-            chill_set = temp_set[0]
-            severe_set = temp_set[0] + delta_severe
-            extreme_set = temp_set[0] + delta_extreme
-            temp_sets = [chill_set, severe_set, extreme_set]
             avg_temps_all, avg_temps = savg.get_avg_temp(temp_ctrl, sleep_repeat)
+            chill_set = temp_set[0]
+            if avg_temps[1] >  temp_set[0] + delta_severe: #if the tank temperature is already hotter than the ramp up temperature
+                severe_set = avg_temps[1] + delta_severe
+            else:
+                severe_set = temp_set[0] + delta_severe    
+            if avg_temps[2] >  temp_set[0] + delta_extreme: #if the tank temperature is already hotter than the ramp up temperature
+                extreme_set = avg_temps[2] + delta_extreme
+            else:
+                extreme_set = temp_set[0] + delta_extreme
+            temp_sets = [chill_set, severe_set, extreme_set]
+            print(temp_sets)
             for index_num in range(len(heater_pins)):
                 if io_inst.heater_states[index_num] == 0: #If tank heater is off
                     if avg_temps[index_num] < temp_sets[index_num]:
@@ -114,7 +121,7 @@ def mhw_sim():
             avg_temps_all, heater_status, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all)                    
         else:
             time.sleep(sleep_repeat)
-
+####################################
     start_ramp = time.perf_counter()
     while today >= post_mhw:
         current_datetime = datetime.datetime.now() #Read the current date and time
@@ -124,11 +131,17 @@ def mhw_sim():
             print(f"The current temperature set points are: {temp_set}")
             delta_severe = mhwr.ramp_down(severe_thresh, start_ramp)
             delta_extreme = mhwr.ramp_down(extreme_thresh, start_ramp)
-            chill_set = temp_set[0]
-            severe_set = temp_set[0] + delta_severe
-            extreme_set = temp_set[0] + delta_extreme
-            temp_sets = [chill_set, severe_set, extreme_set]
             avg_temps_all, avg_temps = savg.get_avg_temp(temp_ctrl, sleep_repeat)
+            chill_set = temp_set[0]
+            if avg_temps[1] >  temp_set[0] + delta_severe: #if the tank temperature is already hotter than the ramp up temperature
+                severe_set = avg_temps[1] + delta_severe
+            else:
+                severe_set = temp_set[0] + delta_severe    
+            if avg_temps[2] >  temp_set[0] + delta_extreme: #if the tank temperature is already hotter than the ramp up temperature
+                extreme_set = avg_temps[2] + delta_extreme
+            else:
+                extreme_set = temp_set[0] + delta_extreme
+            temp_sets = [chill_set, severe_set, extreme_set]
             for index_num in range(len(heater_pins)):
                 if io_inst.heater_states[index_num] == 0: #If tank heater is off
                     if avg_temps[index_num] < temp_sets[index_num]:
