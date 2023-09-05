@@ -64,15 +64,19 @@ def mhw_sim():
                     if avg_temps[index_num] < chill_set:
                         io_inst.heat(index_num, 1)
                         print(f"Sump tank {index_num} heater ON!")
+                        heater_status.append("on")
                     else:
                         print(f"Sump tank {index_num} too hot! Need to chill.")
+                        heater_status.append("off")
                 else: #If tank heater is on
                     if avg_temps[index_num] >= chill_set:
                         io_inst.heat(index_num, 0)
                         print(f"Sump tank {index_num} heater OFF!")
+                        heater_status.append("off")
                     else:
                         print(f"Sump tank {index_num} heater staying on!")
-            avg_temps_all, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all) 
+                        heater_status.append("on")
+            avg_temps_all, heater_status, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all) 
         else:
             time.sleep(sleep_repeat)
 
@@ -104,7 +108,10 @@ def mhw_sim():
                         io_inst.heat(index_num, 0)
                         print(f"Sump tank {index_num} heater OFF!")
                         heater_status.append("off")
-            avg_temps_all, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all)                    
+                    else:
+                        print(f"Sump tank {index_num} heater staying on!")
+                        heater_status.append("on")
+            avg_temps_all, heater_status, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all)                    
         else:
             time.sleep(sleep_repeat)
 
@@ -127,13 +134,19 @@ def mhw_sim():
                     if avg_temps[index_num] < temp_sets[index_num]:
                         io_inst.heat(index_num, 1)
                         print(f"Sump tank {index_num} heater ON!")
+                        heater_status.append("on")
                     else:
                         print(f"Sump tank {index_num} too hot! Need to chill.")
+                        heater_status.append("off")
                 else: #If tank heater is on
                     if avg_temps[index_num] >= temp_sets[index_num]:
                         io_inst.heat(index_num, 0)
                         print(f"Sump tank {index_num} heater OFF!")
-            avg_temps_all, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all)                   
+                        heater_status.append("off")
+                    else:
+                        print(f"Sump tank {index_num} heater staying on!")
+                        heater_status.append("on")
+            avg_temps_all, heater_status, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all)                   
         else:
             time.sleep(sleep_repeat)
 

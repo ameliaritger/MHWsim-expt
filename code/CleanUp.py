@@ -12,7 +12,7 @@ def save_and_sleep(m, temp_set, heater_status, avg_temps_all):
     time.sleep(sleep_measure)
     today = datetime.datetime.today() #check the current date
     
-    return avg_temps_all, today
+    return avg_temps_all, heater_status, today
 
 smtp_username = "805raspberrypi@gmail.com" # This is the username used to login to your SMTP provider
 smtp_password = "uuesginoekrotmcj" # This is the password used to login to your SMTP provider
