@@ -20,7 +20,7 @@ class MEM(object):
 
         self.external_file = open(self.external_file_name, 'a');
         #write header to file
-        header = ["Timestamp", "Chill set", "Severe set", "Extreme set"]
+        header = ["Timestamp", "Chill set", "Severe set", "Extreme set", "Chill heater", "Severe heater", "Extreme heater"]
         for device_list in [sinfo.chill_devices, sinfo.severe_devices, sinfo.extreme_devices, sinfo.sump_devices]:
             for device in device_list:
                 header.append(device)

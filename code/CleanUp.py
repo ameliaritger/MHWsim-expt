@@ -4,11 +4,11 @@ import smtplib
 
 sleep_measure = 1 #number of seconds to sleep between sampling (interval)
 
-def save_and_sleep(m, temp_set, avg_temps_all):
-    all_temps = temp_set + avg_temps_all
+def save_and_sleep(m, temp_set, heater_status, avg_temps_all):
+    all_temps = temp_set + heater_status + avg_temps_all
     m.save(all_temps) #save data to csv
     print(f"Temperatures saved, going to sleep for {sleep_measure} seconds...")
-    avg_temps_all = [] #delete the corrected list of all temps by re-initializing a blank list
+    heater_status, avg_temps_all = ([] for i in range(2) )#deletethe lists by re-initializing a blank list
     time.sleep(sleep_measure)
     today = datetime.datetime.today() #check the current date
     

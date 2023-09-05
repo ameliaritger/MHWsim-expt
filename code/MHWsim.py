@@ -31,19 +31,18 @@ def mhw_sim():
 
     #Initialize variables and lists
     chill_set, severe_set, extreme_set = [0 for i in range(3)] #initialize variables set to zero
-    temp_sets = ([] for i in range(1)) #initialize blank list for treatment temperature set points
-
+    temp_set, heater_status = ([] for i in range(2)) #initialize blank list for treatment temperature set points and heater statuses
+ 
     sleep_repeat = 0.1 #number of seconds to sleep between repeated temperature measurements
     severe_thresh = 4 #initialize severe MHW parameter
     extreme_thresh = 8 #initialize extreme MHW parameter
     today = datetime.datetime.today() #date and time for today
-    mhw_date = datetime.datetime(2023, 9, 5) #date of start of MHW
-    post_mhw = datetime.datetime(2023, 10, 1) #date of start of recovery period
+    mhw_date = datetime.datetime(2023, 9, 3) #date of start of MHW
+    post_mhw = datetime.datetime(2023, 10, 5) #date of start of recovery period
 
     #Initialize heater pins
     heater_pins = [26, 20, 21] #20=LED2, #21=LED3, #26=LED1
     io_inst = io.IO_CTRL(heater_pins)
-    #io_inst.clear() #clear status
 
     # Initialize heaters to off in all tanks
     heater_state = 0
@@ -73,7 +72,7 @@ def mhw_sim():
                         print(f"Sump tank {index_num} heater OFF!")
                     else:
                         print(f"Sump tank {index_num} heater staying on!")
-            avg_temps_all, today = clean.save_and_sleep(m, temp_set, avg_temps_all) 
+            avg_temps_all, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all) 
         else:
             time.sleep(sleep_repeat)
 
@@ -96,13 +95,16 @@ def mhw_sim():
                     if avg_temps[index_num] < temp_sets[index_num]:
                         io_inst.heat(index_num, 1)
                         print(f"Sump tank {index_num} heater ON!")
+                        heater_status.append("on")
                     else:
                         print(f"Sump tank {index_num} too hot! Need to chill.")
+                        heater_status.append("off")
                 else: #If tank heater is on
                     if avg_temps[index_num] >= temp_sets[index_num]:
                         io_inst.heat(index_num, 0)
                         print(f"Sump tank {index_num} heater OFF!")
-            avg_temps_all, today = clean.save_and_sleep(m, temp_set, avg_temps_all)                    
+                        heater_status.append("off")
+            avg_temps_all, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all)                    
         else:
             time.sleep(sleep_repeat)
 
@@ -131,7 +133,7 @@ def mhw_sim():
                     if avg_temps[index_num] >= temp_sets[index_num]:
                         io_inst.heat(index_num, 0)
                         print(f"Sump tank {index_num} heater OFF!")
-            avg_temps_all, today = clean.save_and_sleep(m, temp_set, avg_temps_all)                   
+            avg_temps_all, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all)                   
         else:
             time.sleep(sleep_repeat)
 
