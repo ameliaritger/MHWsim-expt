@@ -24,22 +24,16 @@ profile <- read_csv(here("data", "mhw_profile_final.csv")) %>%
 ```
 
 ```{r}
-data <- read_csv(here("data", "2023-08-31 15:17:07.635884.csv")) %>%
-  select(1:22) %>%
+data <- read_csv(here("data", "2023-09-05 12:13:28.218724.csv")) %>%
+  select(1:4, 8:22) %>%
   clean_names() %>%
   mutate(timestamp = ymd_hms(timestamp)) %>%
-  rename(SetPoint = 2,
-         Rep1 = 5,
-         Rep2 = 6,
-         Rep3 = 7,
-         Rep4 = 8,
-         Rep5 = 9) %>%
-  select(1,2,5:9) %>%
-  pivot_longer(cols=3:7, names_to = "tank", values_to = "temperature")
+  select(-(17:19)) %>% #remove sump tank temps
+  pivot_longer(cols=5:16, names_to = "tank", values_to = "temperature")
 
 ggplot(data, aes(x=timestamp)) +
   geom_line(aes(y=temperature, color=tank), size=1) +
-  geom_line(aes(y=SetPoint), color="black")
+  geom_line(aes(y=chill_set), color="black")
   
 #ggsave(here("figures", "proof.png"))
 ```
@@ -55,11 +49,14 @@ data <- read_csv(here("data", "2023-08-31 15:17:07.635884.csv")) %>%
          T4 = 13,
          T5 =14) %>%
   select(1,2,10:14) %>%
-  pivot_longer(cols=2:6, names_to = "tank", values_to = "temperature")
+  pivot_longer(cols=3:6, names_to = "tank", values_to = "temperature")
 
 
 ggplot(data) +
-  geom_line(aes(x=timestamp, y=temperature, color=tank), size=1)
+  geom_line(aes(x=timestamp, y=temperature, color=tank), size=1) +
+  geom_line(aes(x=timestamp, y=chill_set), color="black")
+
+ggsave(here("figures", "bad.png"))
 ```
 
 
