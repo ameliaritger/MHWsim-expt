@@ -502,7 +502,8 @@ ggplot(new_df, aes(x = date_time)) +
 #ggsave(here("figures", "mhw_profile.png"), width = 20, height = 7)
 
 mhw_profile_final <- new_df %>%
-  select(1,"temp"=11,"extreme"=12,"chill"=10,3) #reformat for use with RPi
+  select(1,"temp"=11,"extreme"=12,"chill"=10,3) %>% #reformat for use with RPi
+   mutate_at(2:4, round, 2)
 
 #write_csv(mhw_profile_final, here("data", "mhw_profile_final.csv"))
 ```
