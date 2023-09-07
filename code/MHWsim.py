@@ -91,14 +91,8 @@ def mhw_sim():
             delta_extreme = mhwr.ramp_up(extreme_thresh, start_ramp)
             avg_temps_all, avg_temps = savg.get_avg_temp(temp_ctrl, sleep_repeat)
             chill_set = temp_set[0]
-            if avg_temps[1] >  temp_set[0] + delta_severe: #if the tank temperature is already hotter than the ramp up temperature
-                severe_set = avg_temps[1] + delta_severe
-            else:
-                severe_set = temp_set[0] + delta_severe    
-            if avg_temps[2] >  temp_set[0] + delta_extreme: #if the tank temperature is already hotter than the ramp up temperature
-                extreme_set = avg_temps[2] + delta_extreme
-            else:
-                extreme_set = temp_set[0] + delta_extreme
+            severe_set = temp_set[0] + delta_severe    
+            extreme_set = temp_set[0] + delta_extreme
             temp_sets = [chill_set, severe_set, extreme_set]
             print(temp_sets)
             for index_num in range(len(heater_pins)):

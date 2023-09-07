@@ -1,8 +1,8 @@
 import time
 
 sec_per_day = 24*60*60 
-onset_rate = 0.6/sec_per_day
-decline_rate = 1.1/sec_per_day 
+onset_rate = 0.51/sec_per_day #calculated from 95th percentile onset and decline rates from MKO, NAP, ARQ, and CARP
+decline_rate = 0.96/sec_per_day 
 
 def ramp_up(delta_max, start_ramp):
     delta = (time.perf_counter()-start_ramp)*onset_rate
