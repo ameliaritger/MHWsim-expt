@@ -25,20 +25,20 @@ naples_mooring_nap_20230608.csv (https://sbclter.msi.ucsb.edu/data/catalog/packa
 
 #Load data
 ```{r}
-sterns <-  read_csv(here("data", "sternswharf_mooring_sbh_20230608.csv"), col_names = TRUE) %>%
+raw_temp <-  read_csv(here("data", "naples_mooring_nap_20230608.csv"), col_names = TRUE) %>%
   select(year, month, day,  decimal_time, Temp_adcp, Temp_top, Temp_mid, Temp_bot,  ADCP_depth) %>%
   clean_names()
 ```
 
 #Clean up the data
 ```{r}
-temp_clean <- stern %>%
+temp_clean <- raw_temp %>%
   unite("date", "year", "month", "day", sep=" ", remove=FALSE) %>%
   mutate(date=ymd(date)) %>% #apply lubridate to date
   arrange(date, decimal_time)# %>%
   #mutate(time=dminutes(decimal_time))
 
-stern_clean <- temp_clean %>%
+temp_clean <- temp_clean %>%
   mutate(source = "adcp",
          source = ifelse(temp_adcp>999,"bottom",source),
          temp=ifelse(temp_adcp>999,temp_bot,temp_adcp),
@@ -52,7 +52,7 @@ stern_clean <- temp_clean %>%
 #  geom_point()
 ```
 
-#Get monthly average temperature for each month across years
+## Get monthly average temperature for each month across years
 ```{r}
 decade_time <- "2013-08-01"
 
@@ -72,7 +72,7 @@ ggplot(mhw_sum, aes(x=month, y=temp, group=year)) +
 #ggsave(here("figures", "avg_temp_mko.png"))
 ```
 
-#Look at extremes - highs and lows - over time
+## Look at extremes - highs and lows - over time
 ```{r}
 max_temp <- max(temp_clean$temp)
 min_temp <- min(temp_clean$temp)
@@ -121,7 +121,7 @@ ts <- heatwaveR::ts2clm(temp_heatwaver, x=t, y=temp, climatologyPeriod = c(start
 mhw <- heatwaveR::detect_event(ts)
 ```
 
-Identify MHW events
+## Identify MHW events
 ```{r}
 mhw_event <- mhw$event %>%
    dplyr::ungroup() %>%
@@ -404,7 +404,7 @@ all_clean <- list(arq_clean, carp_clean, mko_clean, nap_clean)
 all_data <- all_clean %>% #make sure you re-run code above naming mhw_event appropriately
   reduce(full_join)
 
-mhw_profile <- nap_clean %>% #or use "all_data"
+mhw_profile <- temp_clean %>% #or use "all_data"
   filter(date>=ymd("2015-08-01") & date<ymd("2016-04-01")) %>%
   mutate(t = date,
          time=format(times(decimal_time))) %>%
@@ -425,8 +425,10 @@ mhw_profile <- nap_clean %>% #or use "all_data"
 ggplot(mhw_profile, aes(x=date_time)) +
   geom_point(aes(y=temp), color="orange")
   #geom_point(aes(y=chill), color="blue")
+```
 
-#get the seasonal climatology data
+# Extract the seasonal climatology data
+```{r}
 mhw_seas <- mhw$climatology %>%
   slice(mhw_start:mhw_end) %>%
   mutate(month=as.factor(month(t))) %>%
@@ -466,21 +468,21 @@ new_df <- left_join(daily_new, mhw_seas, by = "t") %>%
 
 #Plot it all, compare transformed "Blob" data with real Blob data
 ggplot(new_df, aes(x = date_time)) +
+  geom_line(aes(y = temp, colour="temp"), size = 0.8) +
   geom_line(aes(y = adjusted_thresh, colour="adjusted_thresh"),size = 0.8) +
   geom_line(aes(y = adjusted_extreme, colour="adjusted_extreme"),size = 0.8) +
   #geom_smooth(aes(y=temp), method = "lm", se = F, colour = "blue4") +
   #geom_smooth(aes(y=adjusted_thresh), method = "lm", se = F, colour = "purple4") +
   #geom_smooth(aes(y=adjusted_extreme), method = "lm", se = F, colour = "blue") +
   geom_line(aes(y = adjusted_temp, colour="adjusted_temp"), size = 0.8) +
-  geom_line(aes(y = temp, colour="temp"), size = 0.8) +
   geom_line(data = new_df[!is.na(new_df$seas), ],aes(y = seas, colour="seas"),size = 0.8) +
   scale_colour_manual(name = "Line Colour",
-                      values = c("temp" =  "orange",
+                      values = c("temp" =  "lightblue",
                                  "adjusted_thresh" = "red", 
                                  "adjusted_extreme" =  "darkred",
                                  "adjusted_temp" =  "purple",
                                  "seas" = "dodgerblue4"),
-                      labels= c("Transformed extreme", "Transformed climatology", "Transformed Blob", "Climatology","The Blob")) +
+                      labels= c("Transformed extreme", "Transformed chill", "Transformed severe", "Climatology", "The Blob")) +
   scale_x_datetime(date_labels = "%b %d",
                    breaks = scales::date_breaks("1 week"),
                    expand = c(0, 0),
@@ -497,11 +499,11 @@ ggplot(new_df, aes(x = date_time)) +
         legend.position = "top",
         legend.title = element_blank())
 
-#ggsave(here("figures", "joineddf.png"), width = 20, height = 7)
+#ggsave(here("figures", "mhw_profile.png"), width = 20, height = 7)
 
-mhw_profile_final <- joined_df %>%
-  select(date_time, chill=adjusted_temp, blob=adjusted_thresh, extreme=adjusted_extreme)
+mhw_profile_final <- new_df %>%
+  select(1,"temp"=11,"extreme"=12,"chill"=10,3) #reformat for use with RPi
 
-write_csv(mhw_profile, here("data", "mhw_profile_final.csv"))
+#write_csv(mhw_profile_final, here("data", "mhw_profile_final.csv"))
 ```
 
