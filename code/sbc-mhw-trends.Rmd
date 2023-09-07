@@ -25,20 +25,20 @@ naples_mooring_nap_20230608.csv (https://sbclter.msi.ucsb.edu/data/catalog/packa
 
 #Load data
 ```{r}
-temp_raw <-  read_csv(here("data", "mohawk_mooring_mko_20230608.csv"), col_names = TRUE) %>%
+sterns <-  read_csv(here("data", "sternswharf_mooring_sbh_20230608.csv"), col_names = TRUE) %>%
   select(year, month, day,  decimal_time, Temp_adcp, Temp_top, Temp_mid, Temp_bot,  ADCP_depth) %>%
   clean_names()
 ```
 
 #Clean up the data
 ```{r}
-temp_clean <- temp_raw %>%
+temp_clean <- stern %>%
   unite("date", "year", "month", "day", sep=" ", remove=FALSE) %>%
   mutate(date=ymd(date)) %>% #apply lubridate to date
   arrange(date, decimal_time)# %>%
   #mutate(time=dminutes(decimal_time))
 
-temp_clean <- temp_clean %>%
+stern_clean <- temp_clean %>%
   mutate(source = "adcp",
          source = ifelse(temp_adcp>999,"bottom",source),
          temp=ifelse(temp_adcp>999,temp_bot,temp_adcp),
@@ -93,6 +93,7 @@ ggplot(temp_high, aes(x=month, y=temp, group=year)) +
   geom_line(aes(color=year)) +
   labs(title="Hottest temperature for each month")
 
+#temp_clean <- nap_clean
 #ggsave(here("figures", "max_temp_mko.png"))
 ```
 
@@ -104,6 +105,12 @@ temp_heatwaver <- temp_clean %>%
   summarize(temp=mean(temp)) %>%
   mutate(t=as.Date(date)) %>%
   select(t, temp)
+
+#heatwave_list <- list(arq_heatwaver, mko_heatwaver, carp_heatwaver, nap_heatwaver)
+#mhw_daily <- heatwave_list %>% #make sure you re-run code above naming mhw_event appropriately
+#  reduce(full_join) %>%
+#  group_by(t) %>%
+#  summarize(temp=mean(temp))
 
 #identify start and end dates of df
 start_date <- as.character((head(temp_heatwaver$t,1)))
@@ -132,7 +139,9 @@ mhw_event <- mhw$event %>%
 
 Combine NAP and MKO to summarize MHW patterns
 ```{r}
-#mhw_event <- full_join(mhw_event_mko,mhw_event_nap) #make sure you re-run code above naming mhw_event appropriately
+event_list <- list(arq_event, carp_event, mko_event, nap_event)
+mhw_event <- event_list %>% #make sure you re-run code above naming mhw_event appropriately
+  reduce(full_join)
 
 duration_95 <- unname(quantile(mhw_event$duration, c(.95)))
 duration_mean <- mean(mhw_event$duration)
@@ -153,7 +162,7 @@ mhw_summary <- data.frame(Metric=c("Duration", "Max intensity", "Mean intensity"
                           Percentile_95=c(duration_95,intensity_95,intensity2_95,onset_95,decline_95),
                           Mean=c(duration_mean,intensity_mean,intensity2_mean,onset_mean,decline_mean))
 
-#write_csv(mhw_summary, here("tables", "combined_mhw_summary.csv"))
+#write_csv(mhw_summary, here("tables", "arq-carp-mko-nap_mhw_summary.csv"))
 ```
 
 Plot histogram(s)
@@ -391,21 +400,37 @@ ggplot(mhw_comp, aes(x=t)) +
 
 #Create dfs for MHW temperatures and climatology values
 ```{r}
-mhw_profile <- temp_clean %>%
-  filter(date>=ymd("2015-08-15") & date<ymd("2016-03-01")) %>%
+all_clean <- list(arq_clean, carp_clean, mko_clean, nap_clean)
+all_data <- all_clean %>% #make sure you re-run code above naming mhw_event appropriately
+  reduce(full_join)
+
+mhw_profile <- nap_clean %>% #or use "all_data"
+  filter(date>=ymd("2015-08-01") & date<ymd("2016-04-01")) %>%
   mutate(t = date,
          time=format(times(decimal_time))) %>%
   unite(date_time, c(t, time), sep = " ", remove = TRUE) %>% # combine the date and time columns
   mutate(date_time=ymd_hms(date_time)) %>%
+  group_by(date_time) %>%
+  summarize(temp=mean(temp)) %>%
   select(date_time, temp) %>%
-  mutate(extreme=temp+4,
-         chill=temp-4,
-         t=date(date_time))
+  mutate(t=date(date_time))
 
+#mhw_profile <- nap_clean %>%
+#    filter(date>=ymd("2015-08-15") & date<ymd("2016-03-01")) %>%
+#    mutate(t = date,
+#           time=format(times(decimal_time))) %>%
+#    unite(date_time, c(t, time), sep = " ", remove = TRUE) %>% # combine the date and time columns
+#    mutate(date_time=ymd_hms(date_time))
+  
+ggplot(mhw_profile, aes(x=date_time)) +
+  geom_point(aes(y=temp), color="orange")
+  #geom_point(aes(y=chill), color="blue")
+
+#get the seasonal climatology data
 mhw_seas <- mhw$climatology %>%
   slice(mhw_start:mhw_end) %>%
   mutate(month=as.factor(month(t))) %>%
-  filter(t>=ymd("2015-08-15") & t<ymd("2016-03-01")) %>%
+  filter(t>=ymd("2015-08-01") & t<ymd("2016-04-01")) %>%
   select(t, seas)
 ```
 
@@ -415,25 +440,40 @@ joined_df <- left_join(mhw_profile, mhw_seas, by = "t") %>%
   mutate(seas_thresh = seas+4,
          seas_extreme = seas+8) %>%
   group_by(t) %>%
-  mutate(mean_temp = mean(temp),
-         temp_diff=mean_temp-seas,
-         temp_diff_thresh=mean_temp-seas_thresh,
-         temp_diff_extreme=mean_temp-seas_extreme,
-         adjusted_temp=temp-temp_diff,
-         adjusted_thresh=temp-temp_diff_thresh,
-         adjusted_extreme=temp-temp_diff_extreme) %>%
+  mutate(mean_temp = mean(temp), #get the mean temp for the day (because seasonal climatology value is daily)
+         adjusted_temp=temp-(mean_temp-seas), #get difference between seasonal value for day and measured average value for day
+         adjusted_thresh=temp-(mean_temp-seas_thresh), #get difference between seasonal value+4 and measured value
+         adjusted_extreme=temp-(mean_temp-seas_extreme)) %>% #get difference between seasonal value+8 and measured value
   ungroup()
 
+mhw_daily <- mhw_profile %>%
+  group_by(t) %>%
+  mutate(mean_daily = mean(temp),
+         sd_daily = sd(temp)) %>%
+  ungroup() %>%
+  select(t, mean_daily, sd_daily) %>%
+  distinct()
+
+daily_new <- left_join(mhw_profile, mhw_daily, by = "t")
+
+new_df <- left_join(daily_new, mhw_seas, by = "t") %>%
+  mutate(seas_thresh = seas+4,
+         seas_extreme = seas+8) %>%
+  mutate(zscore = (temp - mean_daily)/sd_daily,
+         adjusted_temp = zscore * sd_daily + seas,
+         adjusted_thresh = adjusted_temp+4,
+         adjusted_extreme = adjusted_temp+8)
+
 #Plot it all, compare transformed "Blob" data with real Blob data
-ggplot(joined_df, aes(x = date_time)) +
-  geom_line(aes(y = temp, colour="temp"), size = 0.8) +
+ggplot(new_df, aes(x = date_time)) +
   geom_line(aes(y = adjusted_thresh, colour="adjusted_thresh"),size = 0.8) +
   geom_line(aes(y = adjusted_extreme, colour="adjusted_extreme"),size = 0.8) +
-  geom_smooth(aes(y=temp), method = "lm", se = F, colour = "blue4") +
-  geom_smooth(aes(y=adjusted_thresh), method = "lm", se = F, colour = "purple4") +
-  geom_smooth(aes(y=adjusted_extreme), method = "lm", se = F, colour = "blue") +
+  #geom_smooth(aes(y=temp), method = "lm", se = F, colour = "blue4") +
+  #geom_smooth(aes(y=adjusted_thresh), method = "lm", se = F, colour = "purple4") +
+  #geom_smooth(aes(y=adjusted_extreme), method = "lm", se = F, colour = "blue") +
   geom_line(aes(y = adjusted_temp, colour="adjusted_temp"), size = 0.8) +
-  geom_line(data = joined_df[!is.na(joined_df$seas), ],aes(y = seas, colour="seas"),size = 0.8) +
+  geom_line(aes(y = temp, colour="temp"), size = 0.8) +
+  geom_line(data = new_df[!is.na(new_df$seas), ],aes(y = seas, colour="seas"),size = 0.8) +
   scale_colour_manual(name = "Line Colour",
                       values = c("temp" =  "orange",
                                  "adjusted_thresh" = "red", 
@@ -444,7 +484,7 @@ ggplot(joined_df, aes(x = date_time)) +
   scale_x_datetime(date_labels = "%b %d",
                    breaks = scales::date_breaks("1 week"),
                    expand = c(0, 0),
-                   limits = c(min(joined_df$date_time),max = max(joined_df$date_time))) +
+                   limits = c(min(new_df$date_time),max = max(new_df$date_time))) +
   scale_y_continuous(limits = c(13, 27), breaks = seq(13, 27, by = 2)) +
   guides(colour = guide_legend(override.aes = list(fill = NA))) +
   labs(y = expression(paste("Temperature (", degree, "C)")),x = "Date") +
@@ -457,7 +497,7 @@ ggplot(joined_df, aes(x = date_time)) +
         legend.position = "top",
         legend.title = element_blank())
 
-#ggsave(here("figures", "MHWprofile_all2.png"), width = 20, height = 7)
+#ggsave(here("figures", "joineddf.png"), width = 20, height = 7)
 
 mhw_profile_final <- joined_df %>%
   select(date_time, chill=adjusted_temp, blob=adjusted_thresh, extreme=adjusted_extreme)
