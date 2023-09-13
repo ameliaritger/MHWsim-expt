@@ -16,27 +16,92 @@ library(janitor)
 
 ```{r}
 profile <- read_csv(here("data", "mhw_profile_final.csv")) %>%
-  filter(date_time < ymd_hms("2015-08-31 12:00:00")) %>%
-  filter(date_time > ymd_hms("2015-08-30 18:00:00")) %>%
-  select(1, 4) %>%
-  mutate(timestamp = date_time %m+% years(8),
-         temperature=chill)
+  filter(date_time < ymd_hms("2015-10-15 23:00:00")) %>%
+  filter(date_time > ymd_hms("2015-09-15 01:00:00")) %>%
+  select(1:4)
+  #mutate(timestamp = date_time %m+% years(8),
+  #       temperature=chill)
+
+ggplot(profile, aes(x = date_time)) +
+  geom_line(aes(y = temp, colour="temp"), size = 0.8) +
+  geom_line(aes(y = chill, colour="chill"),size = 0.8) +
+  geom_line(aes(y = extreme, colour="extreme"),size = 0.8) +
+  scale_colour_manual(name = "Line Colour",
+                      values = c("temp" =  "red",
+                                 "chill" = "dodgerblue4", 
+                                 "extreme" =  "darkred"),
+                      labels= c("Severe", "Chill", " Extreme")) +
+  scale_x_datetime(date_labels = "%b %d",
+                   breaks = scales::date_breaks("3 days"),
+                   expand = c(0, 0),
+                   limits = c(min(profile$date_time),max = max(profile$date_time))) +
+  scale_y_continuous(limits = c(13, 27), breaks = seq(13, 27, by = 2)) +
+  guides(colour = guide_legend(override.aes = list(fill = NA))) +
+  labs(y = expression(paste("Temperature (", degree, "C)")),x = "Date") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45,vjust = 1,hjust = 1,size = 20),
+        axis.text.y = element_text(size = 20),
+        axis.title.x = element_text(size = 22),
+        axis.title.y = element_text(size = 22),
+        legend.text = element_text(size = 20),
+        legend.position = "top",
+        legend.title = element_blank())
+
 ```
 
+# Plot all tank temps
 ```{r}
-data <- read_csv(here("data", "2023-09-05 12:13:28.218724.csv")) %>%
-  select(1:4, 8:22) %>%
+data <- read_csv(here("data", "2023-09-12 16:00:00.047961.csv")) %>%
+  select(1:7, 8:25) %>%
+  #select(1:7, 8:12) %>%
   clean_names() %>%
   mutate(timestamp = ymd_hms(timestamp)) %>%
-  select(-(17:19)) %>% #remove sump tank temps
-  pivot_longer(cols=5:16, names_to = "tank", values_to = "temperature")
+  #select(-(c(3:7))) %>%
+  #pivot_longer(cols=3:7, names_to = "sensor", values_to = "temperature") #5:19
+  select(-(last_col(offset=3):last_col()), #%>% #remove sump tank temps
+         -(c(5:7))) %>% #%>% #remove heater status
+  #rowwise() %>%
+  #mutate(avg_temp = mean(c_across(4:8))) %>%
+  #ungroup() %>%
+  #mutate(diff_temp = (.[[9]]-.[[2]])) %>%
+  pivot_longer(cols=5:18, names_to = "sensor", values_to = "temperature") 
 
 ggplot(data, aes(x=timestamp)) +
-  geom_line(aes(y=temperature, color=tank), size=1) +
-  geom_line(aes(y=chill_set), color="black")
-  
-#ggsave(here("figures", "proof.png"))
+  geom_line(aes(y=temperature, color=sensor), size=1) +
+  #geom_line(aes(y=chill_set), color="black") +
+  geom_line(aes(y=extreme_set), color="black") 
+  #geom_line(aes(y=extreme_set), color="black")
+  #geom_line(aes(y=avg_temp), color="darkblue") +
+  #geom_point(aes(y=diff_temp, color = chill_heater), size=1)
+
+#ggsave(here("figures", "newchillers.png"))
 ```
+
+# Plot the sump tank temps
+```{r}
+sump_tanks <- read_csv(here("data", "2023-09-11 13:50:32.402741.csv")) %>%
+  select(1:7, 23:25) %>%
+  clean_names() %>%
+  mutate(timestamp = ymd_hms(timestamp)) %>%
+  rename(severe =8,
+         extreme = 9,
+         chill =10) %>%
+  mutate(diff_severe = severe-severe_set,
+         diff_extreme = extreme-extreme_set, # + 24,
+         diff_chill = chill-chill_set)
+  
+
+ggplot(sump_tanks, aes(x=timestamp)) +
+  #geom_point(aes(y=severe-18.5), color="black", size=0.5) +
+  geom_point(aes(y=extreme-20, color=extreme_heater)) +
+  #geom_point(aes(y=chill, color=chill_heater)) +
+  #geom_line(aes(y=chill_set), color="black") +
+  #geom_line(aes(y=severe_set-18.5), color="black", size=0.5) +
+  geom_line(aes(y=extreme_set-22), color="black") +
+  geom_point(aes(y=diff_extreme, color=extreme_heater), size=1)
+
+```
+
 
 ```{r}
 data <- read_csv(here("data", "2023-08-31 15:17:07.635884.csv")) %>%
@@ -56,7 +121,7 @@ ggplot(data) +
   geom_line(aes(x=timestamp, y=temperature, color=tank), size=1) +
   geom_line(aes(x=timestamp, y=chill_set), color="black")
 
-ggsave(here("figures", "bad.png"))
+#ggsave(here("figures", "bad.png"))
 ```
 
 
