@@ -34,5 +34,7 @@ def get_avg_temp(temp_ctrl, sleep_repeat):
     print(f"The extreme tank temp average is {avg_extreme}")
     avg_temps = [avg_chill, avg_severe, avg_extreme] #create list of average temperatures for each treatment
     all_temps = all_temps_df.mean(axis=0).apply(lambda x: round(x,3)).tolist() #create a list of the mean average temps for each sensor, rounded to 3 digits
-
-    return all_temps, avg_temps
+    sump_temps = all_temps[-3:] #extract sump tank temperatures
+    sump_temps[0], sump_temps[1] , sump_temps[2] = sump_temps[2], sump_temps[0], sump_temps[1] #reorder sump tank temperatures from chill > extreme
+            
+    return all_temps, avg_temps, sump_temps
