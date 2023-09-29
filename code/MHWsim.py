@@ -9,6 +9,7 @@ import MHWRamp as mhwr
 import SensorAverage as savg
 import SensorInfo as sinfo
 import CleanUp as clean
+import PID
 
 def mhw_sim():
     # Read the CSV file and convert to dictionary
@@ -33,13 +34,20 @@ def mhw_sim():
     chill_set, severe_set, extreme_set = [0 for i in range(3)] #initialize variables set to zero
     temp_set, heater_status, sump_temps = ([] for i in range(3)) #initialize blank list for treatment temperature set points and heater statuses
  
+    #initalize PID parameters
+    pid_value = 0 #initialize PID output threshold parameter
+    error_integral = [0,0,0] #initialize error integral values
+    error_derivative = [0,0,0] #initialize error derivative values
+    previous_temps = [15, 15, 15] #arbitrary, will be changed immediately after first loop
+    fo = (1/40) #calculated frequency of oscillation for my sump tanks
+ 
     sleep_repeat = 0.1 #number of seconds to sleep between repeated temperature measurements
+    #Initialize MHW parameters
     severe_thresh = 4 #initialize severe MHW parameter
     extreme_thresh = 8 #initialize extreme MHW parameter
-    temp_differential = [-0.5, 0 ,1] #difference threshold difference between temperature set point and sump tank -> corrects for lag time between sump and experimental tanks
     today = datetime.datetime.today() #date and time for today
-    mhw_date = datetime.datetime(2023, 9, 5) #date of start of MHW
-    post_mhw = datetime.datetime(2023, 10, 5) #date of start of recovery period
+    mhw_date = datetime.datetime(2023, 10, 2) #date of start of MHW (42 DAYS LONG)
+    post_mhw = datetime.datetime(2023, 11, 13) #date of start of recovery period 
 
     #Initialize heater pins
     heater_pins = [26, 20, 21] #20=LED2, #21=LED3, #26=LED1
@@ -54,39 +62,39 @@ def mhw_sim():
 ######################################## MHW SIM TIME
     while today < mhw_date:
         current_datetime = datetime.datetime.now() #Read the current date and time
+        diff_sump = [1, 1, 1] #minimum temperature in sump tank to force kick back on heater
+        Kp = [0.5,0.5,0.5] #proportional gain, determines how fast the system responds
+        Ki = [0,0,0] #integral, determines how fast steady-state error is removed
+        Kd = [fo/4,fo/4,fo/4] #derivative, determines how far into the future to predict rate of change
         if current_datetime.second % 30 == 00: #run script on the 30 seconds or 00 seconds mark
             closest_datetime = min(temp_profile.keys(), key=lambda x: abs(x - current_datetime)) #Find the date/time row in the temperature profile closest to current date and time
             temp_set = temp_profile[closest_datetime] #Extract the temperature values from the closest date and time
             print(f"The current temperature set points are: {temp_set}")
             avg_temps_all, avg_temps, sump_temps = savg.get_avg_temp(temp_ctrl, sleep_repeat)
             chill_set = temp_set[0]
+            temp_sets = [chill_set,chill_set,chill_set]
+            pid_out, previous_temps, error_integral, error_derivative = PID.control_temps(temp_sets, sump_temps, previous_temps, error_integral, error_derivative, Kp, Ki, Kd)
+            print(f"sump temps are {sump_temps}")
+            print(f"PID outputs are {pid_out}")
             for index_num in range(len(heater_pins)):
                 if io_inst.heater_states[index_num] == 0: #If tank heater is off
-                    if avg_temps[index_num] < chill_set:
-                        if sump_temps[index_num] - chill_set > temp_differential[0]: #if the sump tank is getting too hot (AKA need to correct for lag time)
-                            io_inst.heat(index_num, 0)
-                            print(f"Sump tank {index_num} heater getting too hot, heater staying off!")
-                            heater_status.append("off")
-                        else:
-                            io_inst.heat(index_num, 1)
-                            print(f"Sump tank {index_num} heater ON!")
-                            heater_status.append("on")
+                    if pid_out[index_num] > pid_value and avg_temps[index_num] < chill_set:
+                        io_inst.heat(index_num, 1)
+                        print(f"Sump tank {index_num} heater ON")
+                        heater_status.append("on")
                     else:
-                        print(f"Sump tank {index_num} too hot! Need to chill.")
+                        io_inst.heat(index_num, 0)
+                        print(f"Sump tank {index_num} heater too hot, heater OFF")
                         heater_status.append("off")
                 else: #If tank heater is on
-                    if avg_temps[index_num] >= chill_set:
-                        io_inst.heat(index_num, 0)
-                        print(f"Sump tank {index_num} heater OFF!")
-                        heater_status.append("off")
+                    if pid_out[index_num] > pid_value and avg_temps[index_num] < chill_set: #if sump tank is stable and experimental tanks are too cold
+                        io_inst.heat(index_num, 1)
+                        print(f"Sump tank {index_num} heater staying on")
+                        heater_status.append("on")
                     else:
-                        if sump_temps[index_num] - chill_set > temp_differential[0]: #if the sump tank is getting too hot (AKA need to correct for lag time)
-                            io_inst.heat(index_num, 0)
-                            print(f"Sump tank {index_num} heater getting too hot, heater off!")
-                            heater_status.append("off")
-                        else:
-                            print(f"Sump tank {index_num} heater staying on!")
-                            heater_status.append("on")
+                        io_inst.heat(index_num, 0)
+                        print(f"Sump tank {index_num} heater turning off")
+                        heater_status.append("off")
             sump_temps, avg_temps_all, heater_status, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all, sump_temps) 
         else:
             time.sleep(sleep_repeat)
@@ -94,6 +102,10 @@ def mhw_sim():
     start_ramp = time.perf_counter()
     while today < post_mhw:
         current_datetime = datetime.datetime.now() #Read the current date and time
+        diff_sump = [1, 0.75, 0.5] #minimum temperature in sump tank to force kick back on heater
+        Kp = [0.5,1,64] #proportional gain, determines how fast the system responds
+        Ki = [0,0,0] #integral, determines how fast steady-state error is removed
+        Kd = [fo/4,fo/4,fo/8] #derivative, determines how far into the future to predict rate of change
         if current_datetime.second % 30 == 00: #run script on the 30 seconds or 00 seconds mark
             closest_datetime = min(temp_profile.keys(), key=lambda x: abs(x - current_datetime)) #Find the date/time row in the temperature profile closest to current date and time
             temp_set = temp_profile[closest_datetime] #Extract the temperature values from the closest date and time
@@ -101,44 +113,36 @@ def mhw_sim():
             delta_severe = mhwr.ramp_up(severe_thresh, start_ramp)
             delta_extreme = mhwr.ramp_up(extreme_thresh, start_ramp)
             avg_temps_all, avg_temps, sump_temps = savg.get_avg_temp(temp_ctrl, sleep_repeat)
-            chill_set = round(temp_set[0],1) #MAYBE CHANGE THIS BACK TO NOT ROUND?
-            if avg_temps[1] >  temp_set[0] + delta_severe: #if the tank temperature is already hotter than the ramp up temperature
-                severe_set = avg_temps[1] + delta_severe
-            else:
-                severe_set = temp_set[0] + delta_severe    
-            if avg_temps[2] >  temp_set[0] + delta_extreme: #if the tank temperature is already hotter than the ramp up temperature
-                extreme_set = avg_temps[2] + delta_extreme
-            else:
-                extreme_set = temp_set[0] + delta_extreme
-            #temp_sets = [chill_set, severe_set, extreme_set]
-            temp_sets = [temp_set[0], temp_set[1], temp_set[2]] #CHANGE THIS BACK TO ABOVE AFTER TESTING!
+            chill_set = temp_set[0]
+            severe_set = temp_set[0] + delta_severe    
+            extreme_set = temp_set[0] + delta_extreme
+            temp_sets = [chill_set, severe_set, extreme_set]
+            pid_out, previous_temps, error_integral, error_derivative = PID.control_temps(temp_sets, sump_temps, previous_temps, error_integral, error_derivative, Kp, Ki, Kd)
+            print(f"sump temps are {sump_temps}")
+            print(f"PID outputs are {pid_out}")
             for index_num in range(len(heater_pins)):
                 if io_inst.heater_states[index_num] == 0: #If tank heater is off
-                    if avg_temps[index_num] < temp_sets[index_num]:
-                        if sump_temps[index_num] - temp_sets[index_num] > temp_differential[index_num]: #if the sump tank is getting too hot (AKA need to correct for lag time)
-                            io_inst.heat(index_num, 0)
-                            print(f"Sump tank {index_num} heater getting too hot, heater staying off!")
-                            heater_status.append("off")
-                        else:
-                            io_inst.heat(index_num, 1)
-                            print(f"Sump tank {index_num} heater ON!")
-                            heater_status.append("on")
+                    if pid_out[index_num] > pid_value and avg_temps[index_num] < temp_sets[index_num]: #if sump tank is warming and experimental tanks are not warm enough
+                        io_inst.heat(index_num, 1)
+                        print(f"Sump tank {index_num} heater ON")
+                        heater_status.append("on") 
+                    elif temp_sets[index_num] - sump_temps[index_num] > diff_sump[index_num]: #if sump tank is way too cold
+                        io_inst.heat(index_num, 1)
+                        print(f"Sump tank {index_num} too cold, heater ON")
+                        heater_status.append("on")
                     else:
-                        print(f"Sump tank {index_num} too hot! Need to chill.")
+                        io_inst.heat(index_num, 0)
+                        print(f"Sump tank {index_num} heater too hot")
                         heater_status.append("off")
                 else: #If tank heater is on
-                    if avg_temps[index_num] >= temp_sets[index_num]:
-                        io_inst.heat(index_num, 0)
-                        print(f"Sump tank {index_num} heater OFF!")
-                        heater_status.append("off")
+                    if pid_out[index_num] > pid_value and avg_temps[index_num] < temp_sets[index_num]: #if sump tank is stable and experimental tanks are too cold
+                        io_inst.heat(index_num, 1)
+                        print(f"Sump tank {index_num} heater staying on")
+                        heater_status.append("on")
                     else:
-                        if sump_temps[index_num] - temp_sets[index_num] > temp_differential[index_num]: #if the sump tank is getting too hot (AKA need to correct for lag time)
-                            io_inst.heat(index_num, 0)
-                            print(f"Sump tank {index_num} heater getting too hot, heater off!")
-                            heater_status.append("off")                       
-                        else:
-                            print(f"Sump tank {index_num} heater staying on!")
-                            heater_status.append("on")
+                        io_inst.heat(index_num, 0)
+                        print(f"Sump tank {index_num} heater turning off")
+                        heater_status.append("off")
             sump_temps, avg_temps_all, heater_status, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all, sump_temps)                    
         else:
             time.sleep(sleep_repeat)
@@ -146,6 +150,10 @@ def mhw_sim():
     start_ramp = time.perf_counter()
     while today >= post_mhw:
         current_datetime = datetime.datetime.now() #Read the current date and time
+        diff_sump = [1, 0.75, 0.5] #minimum temperature in sump tank to force kick back on heater
+        Kp = [0.5,1,64] #proportional gain, determines how fast the system responds
+        Ki = [0,0,0] #integral, determines how fast steady-state error is removed
+        Kd = [fo/4,fo/4,fo/8] #derivative, determines how far into the future to predict rate of change
         if current_datetime.second % 30 == 00: #run script on the 30 seconds or 00 seconds mark
             closest_datetime = min(temp_profile.keys(), key=lambda x: abs(x - current_datetime)) #Find the date/time row in the temperature profile closest to current date and time
             temp_set = temp_profile[closest_datetime] #Extract the temperature values from the closest date and time
@@ -154,43 +162,36 @@ def mhw_sim():
             delta_extreme = mhwr.ramp_down(extreme_thresh, start_ramp)
             avg_temps_all, avg_temps, sump_temps = savg.get_avg_temp(temp_ctrl, sleep_repeat)
             chill_set = temp_set[0]
-            if avg_temps[1] >  temp_set[0] + delta_severe: #if the tank temperature is already hotter than the ramp up temperature
-                severe_set = avg_temps[1] + delta_severe
-            else:
-                severe_set = temp_set[0] + delta_severe    
-            if avg_temps[2] >  temp_set[0] + delta_extreme: #if the tank temperature is already hotter than the ramp up temperature
-                extreme_set = avg_temps[2] + delta_extreme
-            else:
-                extreme_set = temp_set[0] + delta_extreme
+            severe_set = temp_set[0] + delta_severe    
+            extreme_set = temp_set[0] + delta_extreme
             temp_sets = [chill_set, severe_set, extreme_set]
+            pid_out, previous_temps, error_integral, error_derivative = PID.control_temps(temp_sets, sump_temps, previous_temps, error_integral, error_derivative, Kp, Ki, Kd)
+            print(f"sump temps are {sump_temps}")
+            print(f"PID outputs are {pid_out}")
             for index_num in range(len(heater_pins)):
                 if io_inst.heater_states[index_num] == 0: #If tank heater is off
-                    if avg_temps[index_num] < temp_sets[index_num]:
-                        if sump_temps[index_num] - temp_sets[index_num] > temp_differential[index_num]: #if the sump tank is getting too hot (AKA need to correct for lag time)
-                            io_inst.heat(index_num, 0)
-                            print(f"Sump tank {index_num} heater getting too hot, heater staying off!")
-                            heater_status.append("off")
-                        else:
-                            io_inst.heat(index_num, 1)
-                            print(f"Sump tank {index_num} heater ON!")
-                            heater_status.append("on")
+                    if pid_out[index_num] > pid_value and avg_temps[index_num] < temp_sets[index_num]: #if sump tank is warming and experimental tanks are not warm enough
+                        io_inst.heat(index_num, 1)
+                        print(f"Sump tank {index_num} heater ON")
+                        heater_status.append("on") 
+                    #elif temp_sets[index_num] - sump_temps[index_num] > diff_sump[index_num]: #if sump tank is way too cold
+                    #    io_inst.heat(index_num, 1)
+                    #    print(f"Sump tank {index_num} too cold, heater ON")
+                    #    heater_status.append("on")
                     else:
-                        print(f"Sump tank {index_num} too hot! Need to chill.")
+                        io_inst.heat(index_num, 0)
+                        print(f"Sump tank {index_num} heater too hot")
                         heater_status.append("off")
                 else: #If tank heater is on
-                    if avg_temps[index_num] >= temp_sets[index_num]:
-                        io_inst.heat(index_num, 0)
-                        print(f"Sump tank {index_num} heater OFF!")
-                        heater_status.append("off")
+                    if pid_out[index_num] > pid_value and avg_temps[index_num] < temp_sets[index_num]: #if sump tank is stable and experimental tanks are too cold
+                        io_inst.heat(index_num, 1)
+                        print(f"Sump tank {index_num} heater staying on")
+                        heater_status.append("on")
                     else:
-                        if sump_temps[index_num] - temp_sets[index_num] > temp_differential[index_num]: #if the sump tank is getting too hot (AKA need to correct for lag time)
-                            io_inst.heat(index_num, 0)
-                            print(f"Sump tank {index_num} heater getting too hot, heater off!")
-                            heater_status.append("off")                       
-                        else:
-                            print(f"Sump tank {index_num} heater staying on!")
-                            heater_status.append("on")
-            sump_temps, avg_temps_all, heater_status, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all, sump_temps)                   
+                        io_inst.heat(index_num, 0)
+                        print(f"Sump tank {index_num} heater turning off")
+                        heater_status.append("off")
+            sump_temps, avg_temps_all, heater_status, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all, sump_temps)                    
         else:
             time.sleep(sleep_repeat)
 
