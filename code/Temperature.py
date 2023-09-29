@@ -1,5 +1,5 @@
 import time
-import CleanUp as clean
+import Alert
 
 wait_time = 0
 
@@ -33,10 +33,11 @@ class TEMP(object):
                 return temp_c
         except:
             temp_c = float(-1)
+            print(device_file)
             print("thermistor failure")
             now = time.perf_counter()
             if now > wait_time:
-                clean.send_email()
+                Alert.send_email()
                 wait_time = now+5*60
             return temp_c
 """   
@@ -61,7 +62,7 @@ def read_temp(device_file):
         temp_c = float(-1)
         now = time.perf_counter()
         if now > wait_time:
-            clean.send_email()
+            Alert.send_email()
             wait_time = now+5*60
         return temp_c
 """
