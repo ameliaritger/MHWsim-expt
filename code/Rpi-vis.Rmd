@@ -52,7 +52,7 @@ ggplot(profile, aes(x = date_time)) +
 
 # Plot all tank temps
 ```{r}
-data <- read_csv(here("data", "2023-09-14 16:22:12.972213.csv")) %>%
+data <- read_csv(here("data", "2023-10-23 02:49:03.179706.csv")) %>%
   select(1:7, 8:25) %>%
   #select(1:7, 8:12) %>%
   clean_names() %>%
@@ -65,24 +65,24 @@ data <- read_csv(here("data", "2023-09-14 16:22:12.972213.csv")) %>%
   #mutate(avg_temp = mean(c_across(4:8))) %>%
   #ungroup() %>%
   #mutate(diff_temp = (.[[9]]-.[[2]])) %>%
-  pivot_longer(cols=5:18, names_to = "sensor", values_to = "temperature")  %>%
-  filter(timestamp > ymd_hms("2023-09-14 18:00:00"))
+  pivot_longer(cols=5:18, names_to = "sensor", values_to = "temperature") %>%
+  filter(timestamp > ymd_hms("2023-10-18 13:30:00"))
 
 ggplot(data, aes(x=timestamp)) +
   geom_line(aes(y=temperature, color=sensor), size=1) +
-  geom_line(aes(y=15), color="black") +
-  geom_line(aes(y=18), color="black") +
-  geom_line(aes(y=22), color="black") +
-  scale_y_continuous(limits=c(21.75,22.3))
+  geom_line(aes(y=chill_set), color="black") +
+  geom_line(aes(y=severe_set), color="black") +
+  geom_line(aes(y=extreme_set), color="black")
+  scale_y_continuous(limits=c(14.75,15.25))
   #geom_line(aes(y=avg_temp), color="darkblue") +
   #geom_point(aes(y=diff_temp, color = chill_heater), size=1)
 
-ggsave(here("figures", "higherpid.png"))
+ggsave(here("figures", "chill-old-new.png"))
 ```
 
 # Plot the sump tank temps
 ```{r}
-sump_all <- read_csv(here("data", "2023-09-14 16:22:12.972213.csv")) %>%
+sump_all <- read_csv(here("data", "2023-09-18 14:36:07.849501.csv")) %>%
   select(1:7, 23:25) %>%
   clean_names() %>%
   mutate(timestamp = ymd_hms(timestamp)) %>%
@@ -98,8 +98,9 @@ ggplot(sump_all, aes(x=timestamp)) +
   geom_point(aes(y=severe, color=severe_heater)) +
   geom_point(aes(y=chill, color=chill_heater)) +
   geom_line(aes(y=15), color="black") +
-  geom_line(aes(y=18), color="black") +
-  geom_line(aes(y=22), color="black")
+  geom_line(aes(y=19), color="black") +
+  geom_line(aes(y=24), color="black") +
+  scale_y_continuous(limits=c(13.3,15.5))
 
   geom_line(aes(y=chill_set), color="black", size=0.5) +
   geom_line(aes(y=severe_set), color="black", size=0.5) +
@@ -137,7 +138,7 @@ ggplot(sump_tank, aes(x=timestamp)) +
 
 
 ```{r}
-severe_tank <- read_csv(here("data", "2023-09-14 16:22:12.972213.csv")) %>%
+severe_tank <- read_csv(here("data", "2023-09-14 22:58:30.164635.csv")) %>%
   select(1:7, 8:25) %>%
   clean_names() %>%
   mutate(timestamp = ymd_hms(timestamp)) %>%
@@ -185,7 +186,7 @@ find_peaks <- function (x, m = 3){
      pks
 }
 
-pk <- find_peaks(one, m = 7) #set a high threshold bc we need it...
+pk <- find_peaks(one, m = 10) #set a high threshold bc we need it...
 diff_list <- diff(pk, lag=2) #period = 40 SEVERE, 41 CHILL
 
 peaks <- severe_tank %>%
