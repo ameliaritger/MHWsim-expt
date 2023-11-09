@@ -17,28 +17,35 @@ library(scales) #date_format for x axis plot
 library(heatwaveR)
 library(ggpubr) #combine multiple ggplots
 library(chron) #convert decimal time
+library(EDIutils) #to download LTER data
+library(xml2) #to open LTER xlsx data
+
+source("read_sbc_data.r")
+dt <- read.csv("vw_timeseries_entities.csv",stringsAsFactors = FALSE)
+dsname <- "Moored CTD and ADCP: NAP - Moored CTD and ADCP at Naples Reef NAP"
 ```
 
-Datafiles to download from SBC LTER: 
-mohawk_mooring_mko_20230608.csv (https://sbclter.msi.ucsb.edu/data/catalog/package/?package=knb-lter-sbc.2007)
-naples_mooring_nap_20230608.csv (https://sbclter.msi.ucsb.edu/data/catalog/package/?package=knb-lter-sbc.2002)
+Moored CTD and ADCP: ARQ - Moored CTD and ADCP at Arroyo Quemado Reef ARQ
+Moored CTD and ADCP: CAR - Moored CTD and ADCP at Carpinteria Reef CAR
+Moored CTD and ADCP: MKO - Moored CTD and ADCP at Mohawk Reef MKO
+Moored CTD and ADCP: NAP - Moored CTD and ADCP at Naples Reef NAP
 
 #Load data
 ```{r}
-raw_temp <-  read_csv(here("data", "naples_mooring_nap_20230608.csv"), col_names = TRUE) %>%
+raw_temp <-  read_sbc_data(dsname) %>%
   select(year, month, day,  decimal_time, Temp_adcp, Temp_top, Temp_mid, Temp_bot,  ADCP_depth) %>%
   clean_names()
 ```
 
 #Clean up the data
 ```{r}
-temp_clean <- raw_temp %>%
+temp_date <- raw_temp %>%
   unite("date", "year", "month", "day", sep=" ", remove=FALSE) %>%
   mutate(date=ymd(date)) %>% #apply lubridate to date
   arrange(date, decimal_time)# %>%
   #mutate(time=dminutes(decimal_time))
 
-temp_clean <- temp_clean %>%
+temp_clean <- temp_date %>%
   mutate(source = "adcp",
          source = ifelse(temp_adcp>999,"bottom",source),
          temp=ifelse(temp_adcp>999,temp_bot,temp_adcp),
@@ -47,9 +54,6 @@ temp_clean <- temp_clean %>%
          source = ifelse(temp>999,"top",source),
          temp=ifelse(temp>99,temp_top,temp)) %>%
   filter(temp<999)
-
-#ggplot(temp_clean, aes(x=date, y=temp)) +
-#  geom_point()
 ```
 
 ## Get monthly average temperature for each month across years
@@ -134,17 +138,28 @@ mhw_event <- mhw$event %>%
   select(1:12) %>%
   filter(date_start < ymd("2017-01-01") & date_end > ymd("2014-06-01"))
 
+nap_event <- mhw_event
 #write_csv(mhw_event, here("tables", "mohawk_mhw_all.csv"))
 ```
 
 Combine NAP and MKO to summarize MHW patterns
 ```{r}
-event_list <- list(arq_event, carp_event, mko_event, nap_event)
+event_list <- list(arq_event, car_event, mko_event, nap_event)
 mhw_event <- event_list %>% #make sure you re-run code above naming mhw_event appropriately
   reduce(full_join)
 
+ggplot(data = mhw_event, aes(x=duration)) +
+  geom_histogram()
+
 duration_95 <- unname(quantile(mhw_event$duration, c(.95)))
+duration_90 <- unname(quantile(mhw_event$duration, c(.90)))
 duration_mean <- mean(mhw_event$duration)
+
+duration_sd <- sd(mhw_event$duration)
+duration_se <-  sd(mhw_event$duration)/sqrt(length((mhw_event$duration)))
+duration_min <- min(mhw_event$duration)
+duration_max <- max(mhw_event$duration)
+duration_quantile <- quantile(mhw_event$duration, prob=c(.25,.5,.75), type=1)
 
 intensity_95 <- unname(quantile(mhw_event$intensity_max, c(.95)))
 intensity_mean <- mean(mhw_event$intensity_max)
