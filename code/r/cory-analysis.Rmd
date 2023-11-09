@@ -1,0 +1,53 @@
+---
+title: "Untitled"
+author: "Amelia Ritger"
+date: "2023-11-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(janitor)
+library(here)
+library(lubridate)
+
+
+repro <- read_csv(here("data", "repro.csv")) %>% #each file will be read in, specify which columns you need read in to avoid any error
+  clean_names() %>%
+  mutate(date = mdy(date),
+         treatment = ifelse(tank < 6, "cold", ifelse(tank>9, "extreme", "severe")))
+
+library(ggpmisc)
+ggplot(repro, aes(x=date, y=n, color=genet)) +
+  geom_point() +
+  stat_poly_eq(use_label("eq")) +
+  geom_smooth(method = "lm", se = F) +
+  facet_wrap(~treatment)
+```
+
+```{r}
+open <- read_csv(here("data", "behavior.csv")) %>% #each file will be read in, specify which columns you need read in to avoid any error
+  clean_names() %>%
+  mutate(date = mdy(date),
+         treatment = ifelse(tank < 6, "cold", ifelse(tank>9, "extreme", "severe")),
+         percent_open = open/n,
+         percent_closed = closed/n)
+
+open_clean <- open %>%
+  mutate(diff = )
+
+ggplot(open, aes(x=date, y=percent_open, fill=genet)) +
+  geom_violin(position="dodge", alpha=0.5, outlier.colour="transparent") +
+  #scale_fill_viridis(discrete=T, name="") +  #stat_poly_eq(use_label("eq")) +
+  #geom_smooth(method = "lm", se = F) +
+  facet_wrap(~treatment)
+
+ggplot(open, aes(x=date, y=percent_closed, fill=genet)) +
+  geom_violin(position="dodge", alpha=0.5, outlier.colour="transparent") +
+  geom_point(aes(color=genet)) +
+  #scale_fill_viridis(discrete=T, name="") +  #stat_poly_eq(use_label("eq")) +
+  #geom_smooth(method = "lm", se = F) +
+  facet_wrap(~treatment)
+```
+
