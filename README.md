@@ -1,6 +1,6 @@
 # MHWsim 
 
-![5 gallon tanks in lab containing strabwerry anemones on coral frag tiles](/media/mhw_tanks.png?raw=true)
+<p><img src="/media/mhw_tanks.png" alt="5 gallon tanks in lab containing strabwerry anemones on coral frag tiles" width="80%"/></p>
 
 ## What's in this repository?
 This repository contains the scripts and files related to the development of a Marine Heatwave Simulator (MHWsim)using a Raspberry Pi, and the data collected during a MHWsim experiment using Corynactis californica as a study organism.
