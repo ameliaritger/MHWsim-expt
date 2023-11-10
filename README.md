@@ -10,25 +10,25 @@ This repository is maintained by Hofmann Lab graduate student Amelia Ritger (Git
 ## How is this repository structured?
 ```
 .
-├── experiment/                                 # directory containing all files related to the Amelia's MHWsim experiment
+├── experiment/                                 # directory containing files related to the Amelia's MHWsim experiment
 |
 ├── media/                                      # directory containing media files for project repo
 |
 ├── simulator/                                  # directory containing resources for building and running the RPi MHWsim system
 |   └── code/                                   # directory with scripts for the MHWsim
-|      └── Alert.py                             # script for sending SMS alerts
-|      └── CleanUp.py                           # script for saving data, clearing lists/variables, and going to sleep 
 |      └── drafts/                              # directory containing draft .py scripts
+|      └── Alert.py                             # script for sending SMS alerts
+|      └── CleanUp.py                           # script for saving data, clearing lists/variables, and going to sleep
 |      └── IO_ctrl.py                           # script for initializing relay board
-|      └── main.py                              # main script to run all code associated with MHWsim
-|      └── Memory.py                            # script for constructing and saving to .csv file
-|      └── mhw_profile.csv                      # DESCRIPTION
 |      └── MHWRamp.py                           # script for ramping up and down temperatures at start/end of MHW event
 |      └── MHWsim.py                            # script for initializing MHWsim objects, parameters and then running the MHWsim 
+|      └── Memory.py                            # script for constructing and saving to .csv file
 |      └── PID.py                               # script for Proportional–integral–derivative controller algorithm
-|      └── SensorAverage.py                     # DESCRIPTION
-|      └── SensorInfo.py                        # DESCRIPTION
-|      └── Temperature.py                       # DESCRIPTION
+|      └── SensorAverage.py                     # script for averaging multiple consecutive temperature probe readings and calculating the average temperature across replicates
+|      └── SensorInfo.py                        # script to enter temperature probe ROM numbers and location identification, and calibration values for each probe
+|      └── Temperature.py                       # script for reading temperature probes
+|      └── main.py                              # main script to run all code associated with MHWsim
+|      └── mhw_profile.csv                      # MHWsim experiment data, required for initial code test
 |
 |   └── documentation/                          # directory containing MHWsim system build documentation
 |      └── rpiMHWsimConstruction.docx           # document for building the RPi MHWsim system
@@ -42,4 +42,4 @@ This repository is maintained by Hofmann Lab graduate student Amelia Ritger (Git
 └── MHWsim.Rproj
 ```
 
-## PUBLICATION TO COME, STAY TUNED!
+## STAY TUNED FOR THE PUBLICATION!
