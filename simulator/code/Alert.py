@@ -1,11 +1,11 @@
 import smtplib
 
-smtp_username = "YOUR RPi's EMAIL ADDRESS" # This is the username used to login to your SMTP provider
-smtp_password = "YOUR RPi's EMAIL PASSWORD" # This is the password used to login to your SMTP provider
+smtp_username = "youremail@email.com" # This is the username used to login to your SMTP provider
+smtp_password = "password" # This is the password used to login to your SMTP provider
 smtp_host = "smtp.gmail.com" # This is the host of the SMTP provider - change if your RPi is not using a gmail account
 smtp_port = 587 # This is the port that your SMTP provider uses
 
-sender = "YOUR RPi's EMAIL ADDRESS"
+sender = "youremail@email.com"
 receiver = ["THE PHONE NUMBER WHERE YOU WANT TO RECEIVE TEXT ALERTS"] # must be a list
 
 subject = "YOUR SUBJECT HEADER"
