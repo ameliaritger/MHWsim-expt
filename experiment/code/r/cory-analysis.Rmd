@@ -11,12 +11,31 @@ library(tidyverse)
 library(janitor)
 library(here)
 library(lubridate)
-
-
-repro <- read_csv(here("data", "repro.csv")) %>% #each file will be read in, specify which columns you need read in to avoid any error
+```
+# Population size
+```{r}
+alive <- read_csv(here("experiment", "data", "mortality.csv")) %>% #each file will be read in, specify which columns you need read in to avoid any error
   clean_names() %>%
   mutate(date = mdy(date),
-         treatment = ifelse(tank < 6, "cold", ifelse(tank>9, "extreme", "severe")))
+         treatment = ifelse(tank < 6, "cold", ifelse(tank>9, "extreme", "severe")),
+         tank=as.factor(tank)) %>%
+  group_by(tank, genet) %>%
+  mutate(diff_n = n-lag(n, default = first(n))) %>%
+  ungroup()
+
+ggplot(alive, aes(x=date, y=diff_n)) +
+  geom_line(aes(color=genet)) +
+  facet_wrap(~tank)
+  
+```
+
+# Reproduction 
+```{r}
+repro <- read_csv(here("experiment", "data", "repro.csv")) %>% #each file will be read in, specify which columns you need read in to avoid any error
+  clean_names() %>%
+  mutate(date = mdy(date),
+         treatment = ifelse(tank < 6, "cold", ifelse(tank>9, "extreme", "severe")),
+         tank=as.factor(tank))
 
 library(ggpmisc)
 ggplot(repro, aes(x=date, y=n, color=genet)) +
@@ -26,11 +45,13 @@ ggplot(repro, aes(x=date, y=n, color=genet)) +
   facet_wrap(~treatment)
 ```
 
+# Behavior
 ```{r}
 open <- read_csv(here("data", "behavior.csv")) %>% #each file will be read in, specify which columns you need read in to avoid any error
   clean_names() %>%
   mutate(date = mdy(date),
          treatment = ifelse(tank < 6, "cold", ifelse(tank>9, "extreme", "severe")),
+         tank=as.factor(tank),
          percent_open = open/n,
          percent_closed = closed/n)
 
