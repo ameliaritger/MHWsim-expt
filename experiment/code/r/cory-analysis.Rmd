@@ -60,7 +60,8 @@ open <- read_csv(here("experiment", "data", "behavior.csv")) %>% #each file will
 ```{r}
 all <- full_join(open, alive, by=join_by(date==date, tank==tank, genet==genet)) %>%
   select(-time.y, -time.x) %>%
-  mutate(treatment = ifelse(tank < 6, "cold", ifelse(tank>10, "extreme", "severe")),
+  mutate(treatment = factor(case_when(tank < 6 ~ "cold", tank > 10 ~ "extreme", TRUE ~ "severe"),
+                            levels = c("cold", "severe", "extreme")),
          tank=as.factor(tank),
          value_replace = case_when(is.na(open) ~ n-(0+partial_open+partial_closed+closed),
                                    is.na(partial_open) ~ n-(open+0+partial_closed+closed),
@@ -70,7 +71,10 @@ all <- full_join(open, alive, by=join_by(date==date, tank==tank, genet==genet)) 
          across(open:closed, ~ ifelse(date < ymd("2023-09-30"), .x,
                                       ifelse(is.na(.x), value_replace, .x))),
         percent_open = (open+partial_open)/n,
-        percent_closed = (closed+partial_closed)/n) %>%
+        percent_closed = (closed+partial_closed)/n,
+        #create a new column mhw where if the date is before 12/12/23, it's "during", and if it's after, it's "after"
+        mhw = factor(case_when(date < ymd("2023-12-12") ~ "during", TRUE ~ "after"),
+                     levels = c("during", "after"))) %>%
   group_by(tank, genet) %>%
   arrange(date) %>%
   mutate(removed_cum = cumsum(removed), # generate cumulative number of polyps removed, to represent total number of polyps excluding removal
@@ -83,13 +87,15 @@ all <- full_join(open, alive, by=join_by(date==date, tank==tank, genet==genet)) 
 ggplot(all, aes(x=genet, y=percent_closed, fill=genet, group=genet)) +
   geom_point(aes(color=genet)) +
   geom_violin(position="dodge", alpha=0.5, outlier.colour="transparent") +
-  facet_wrap(~treatment)
+  #facet_wrap(~treatment)
+  facet_wrap(~mhw+treatment)
 
-ggplot(all, aes(x=date, y=growth_rate)) +
-  geom_point(aes(color=genet)) +
+ggplot(all, aes(x=date, y=growth_rate, group=genet, color=genet)) +
+  geom_point(alpha=0.5) +
   stat_poly_eq(use_label("eq")) +
-  geom_smooth(aes(color=genet), method = "lm", se = F) +
-  facet_wrap(~treatment)
+  geom_smooth(method = "lm", se = F) +
+  #facet_wrap(~treatment)
+  facet_wrap(~mhw+treatment)
 
 sample_anova <-aov(data=all,diff_n~genet+treatment)
 summary(sample_anova)
