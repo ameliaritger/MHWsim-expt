@@ -63,6 +63,7 @@ all <- full_join(open, alive, by=join_by(date==date, tank==tank, genet==genet)) 
   mutate(treatment = factor(case_when(tank < 6 ~ "cold", tank > 10 ~ "extreme", TRUE ~ "severe"),
                             levels = c("cold", "severe", "extreme")),
          tank=as.factor(tank),
+         genet=as.factor(genet),
          value_replace = case_when(is.na(open) ~ n-(0+partial_open+partial_closed+closed),
                                    is.na(partial_open) ~ n-(open+0+partial_closed+closed),
                                    is.na(partial_closed) ~ n-(open+partial_open+0+closed),
@@ -84,18 +85,50 @@ all <- full_join(open, alive, by=join_by(date==date, tank==tank, genet==genet)) 
   ungroup() %>%
   filter(!is.na(date))
 
+# run linear regression of growth rate x date for each genet
+model <- all %>%
+  filter(mhw == "after",
+         treatment == "extreme") %>%
+  group_by(genet) %>%
+  do(model=lm(growth_rate ~ date, data = .))
+
+#extract equation for each genet
+eq <- model %>%
+  do(eq = paste0("y = ", format(coef(.$model)[1], digits = 2),
+                " + ", format(coef(.$model)[2], digits = 2), "x"))
+
+eq <- eq %>%
+#add back genet column
+  mutate(genet = model$genet)
+
+ggplot(df, aes(x, y)) +
+  geom_point() +
+  stat_smooth(method = "lm", formula = y ~ poly(x, 2), se = FALSE) +
+  geom_label(x = 5, y = 35, label = eq)
+
 ggplot(all, aes(x=genet, y=percent_closed, fill=genet, group=genet)) +
   geom_point(aes(color=genet)) +
   geom_violin(position="dodge", alpha=0.5, outlier.colour="transparent") +
   #facet_wrap(~treatment)
   facet_wrap(~mhw+treatment)
 
-ggplot(all, aes(x=date, y=growth_rate, group=genet, color=genet)) +
+ggplot(all, aes(x=date, y=growth_rate, color=genet)) +
   geom_point(alpha=0.5) +
-  stat_poly_eq(use_label("eq")) +
-  geom_smooth(method = "lm", se = F) +
+  #facet_wrap(~mhw+treatment) +
+  geom_smooth(method = "lm", formula = y ~ x, se = F) +
+  stat_poly_eq(use_label("eq"), formula = y ~ x, na.rm=TRUE)
   #facet_wrap(~treatment)
-  facet_wrap(~mhw+treatment)
+
+ggplot(all[all$mhw == "after" & all$treatment == "extreme", ], aes(x = date, y = growth_rate, group = genet)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", formula = y ~ x, se = F) +
+    #stat_smooth_func(geom="text",method="lm",hjust=0,parse=TRUE)+
+    stat_poly_eq(aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+               label.x.npc = "right", label.y.npc = 0.15,
+               formula = y ~ x, parse = TRUE, size = 3)
+  #stat_smooth(method = "lm", formula = y ~ x, se = F) +
+  #stat_poly_eq(use_label("eq"), na.rm = TRUE, coef.keep.zeros = TRUE) +
+  scale_y_continuous(limits = c(0, 100))
 
 sample_anova <-aov(data=all,diff_n~genet+treatment)
 summary(sample_anova)
