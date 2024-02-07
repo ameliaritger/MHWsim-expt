@@ -17,11 +17,11 @@ library(janitor)
 # Load data and merge all temp files
 ```{r}
 rm(list = ls())
-temp_files <- list.files(here("data", "rpi"), pattern=".*csv")
+temp_files <- list.files(here("experiment", "data", "rpi"), pattern=".*csv")
 temp_all <- data.frame()
 for (i in 1:length(temp_files)){
   print(temp_files[i])
-  temp_data <- read_csv(here("data", "rpi", temp_files[i])) #each file will be read in, specify which columns you need read in to avoid any error
+  temp_data <- read_csv(here("experiment", "data", "rpi", temp_files[i])) #each file will be read in, specify which columns you need read in to avoid any error
   temp_all <- rbind(temp_all, temp_data) #for each iteration, bind the new data to the building dataset
 }
 temp_all <- temp_all %>%
@@ -29,11 +29,11 @@ temp_all <- temp_all %>%
   select(1:25)
 
 if(FALSE){
-type1_files <- list.files(here("data", "rpi", "type1"), pattern=".*csv")
+type1_files <- list.files(here("experiment", "data", "rpi", "type1"), pattern=".*csv")
 temp_1 <- data.frame()
 for (i in 1:length(type1_files)){
   print(type1_files[i])
-  temp_data <- read_csv(here("data", "rpi", "type1", type1_files[i])) #each file will be read in, specify which columns you need read in to avoid any error
+  temp_data <- read_csv(here("experiment", "data", "rpi", "type1", type1_files[i])) #each file will be read in, specify which columns you need read in to avoid any error
   temp_1 <- rbind(temp_1, temp_data) #for each iteration, bind the new data to the building dataset
 }
 temp_1 <- temp_1 %>%
@@ -43,11 +43,11 @@ temp_1 <- temp_1 %>%
          extreme_heater = "NA") %>%
   select(1:4, 23:25, 5:22)
 
-type2_files <- list.files(here("data", "rpi", "type2"), pattern=".*csv")
+type2_files <- list.files(here("experiment", "data", "rpi", "type2"), pattern=".*csv")
 temp_2 <- data.frame()
 for (i in 1:length(type2_files)){
   print(type2_files[i])
-  temp_data <- read_csv(here("data", "rpi", "type2", type2_files[i])) #each file will be read in, specify which columns you need read in to avoid any error
+  temp_data <- read_csv(here("experiment", "data", "rpi", "type2", type2_files[i])) #each file will be read in, specify which columns you need read in to avoid any error
   temp_2 <- rbind(temp_2, temp_data) #for each iteration, bind the new data to the building dataset
 }
 temp_2 <- temp_2 %>%
@@ -73,12 +73,13 @@ temp_clean <- temp_all %>%
          -(c(5:7))) %>% #%>% #remove heater status
   pivot_longer(cols=5:18, names_to = "sensor", values_to = "temperature") %>%
   filter(timestamp > ymd_hms("2023-09-21 12:00:00")) #only keep data since addition of Corynactis
+  #filter(timestamp > ymd_hms("2024-01-20 01:00:00"))
 
 ggplot(temp_clean, aes(x=timestamp)) +
   geom_line(aes(y=temperature, color=sensor), size=1) +
-  geom_line(aes(y=chill_set), color="black") +
-  geom_line(aes(y=severe_set), color="black") +
-  geom_line(aes(y=extreme_set), color="black")
+  geom_line(aes(y=chill_set), color="blue") +
+  geom_line(aes(y=severe_set), color="orange") +
+  geom_line(aes(y=extreme_set), color="red")
 
 #ggsave(here("figures", "chill-old-new.png"))
 ```
