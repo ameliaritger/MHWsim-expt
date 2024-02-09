@@ -20,6 +20,7 @@ library(data.table)
 library(EDIutils)
 library(xml2)
 library(chron) #convert decimal time
+library(ggpubr) #combine multiple ggplots
 ```
 
 ```{r}
@@ -144,8 +145,8 @@ mko_adcp <- read_sbc_data("Moored CTD and ADCP: NAP - Moored CTD and ADCP at Nap
 # Reformat df to run heatwaveR
 mko_heatwaver <- mko_adcp %>%
   group_by(date) %>%
-  filter(!is.na(temp_mid)) %>%
-  summarize(temp_c=mean(temp_mid)) %>%
+  filter(!is.na(temp_adcp)) %>%
+  summarize(temp_c=mean(temp_adcp)) %>%
   mutate(date=as.Date(date)) %>%
   rename(t=date,
          temp=temp_c) %>%
@@ -155,9 +156,11 @@ mko_heatwaver <- mko_adcp %>%
 head(mko_heatwaver)
 tail(mko_heatwaver)
 
-mhw_start_date <- "2001-02-14"
+mhw_start_date <- "2001-02-15"
 mhw_end_date <- "2023-04-11"
+```
 
+```{r}
 # Detect the events in a time series
 ts <- heatwaveR::ts2clm(mko_heatwaver, x=t, y=temp, climatologyPeriod = c(mhw_start_date, mhw_end_date))
 mhw <- heatwaveR::detect_event(ts)
@@ -172,44 +175,97 @@ mhw$event %>%
 climatology <- mhw$climatology %>%
   arrange(t)
   
-mhw_start <- which(climatology$t == "2014-01-01")[1]
-mhw_end <- which(climatology$t == "2016-02-29")[1]
+mhw_start <- which(climatology$t == "2018-01-01")[1]
+mhw_end <- which(climatology$t == "2019-01-01")[1]
 
 #subset for dates of interest
 mko_mhw <- mhw$climatology %>%
   slice(mhw_start:mhw_end)
 
 #plot clean ribbon
+#y <- 
 ggplot(mko_mhw, aes(x = t, ymax = pmax(thresh, temp), ymin = thresh)) +
   geom_line(aes(y = seas, colour = "seas"), size = 0.8) +
-  geom_ribbon(fill = "red") +
+  geom_ribbon(fill = "#D55E00") +
   geom_line(aes(y = thresh, colour = "thresh"), size = 0.8) +
-  geom_line(aes(y = temp, colour = "temp"), alpha=0.3) +
+  geom_line(aes(y = temp, colour = "temp"), alpha=0.5, size=0.7) +
+  annotate("rect", xmin=ymd("2018-07-01"), xmax=ymd("2018-07-31"), ymin=-Inf, ymax=Inf, alpha=0.2,fill="#999999") +
   #geom_text(size = 12, colour = "black", aes(x = as.Date("2014-02-01"), y = 24, label = "MKO")) +
   #geom_line(aes(y = seas, colour = "seas"), size = 0.8, linetype="dashed") +
   scale_colour_manual(name = "Line Colour",
-                      values = c("seas" = "dodgerblue4",
-                                 "temp" = "black", 
-                                 "thresh" =  "chartreuse4"),
+                      values = c("seas" = "#0072B2",
+                                 "temp" = "#000000", 
+                                 "thresh" =  "#009E73"),
                       labels= c("Climatology", "Temperature", "Threshold")) +
   scale_x_date(date_labels = "%b %Y",
-               breaks = scales::date_breaks("6 months"),
+               breaks = scales::date_breaks("3 months"),
                expand=c(0,0),
-               limits = c(min(mko_mhw$t), 
-                         max = max(mko_mhw$t))) +
-  scale_y_continuous(limits = c(11, 26), breaks = seq(11, 26, by = 2)) +
+               limits = c(min(mko_mhw$t),
+                          max(mko_mhw$t))) +
+  #start the x axis tick labels at Jan 1 2018
+  scale_y_continuous(limits = c(10, 21), breaks = seq(10, 21, by = 2)) +
   guides(colour = guide_legend(override.aes = list(fill = NA))) +
   labs(y = expression(paste("Temperature (", degree, "C)")),
        x = "Date") +
   theme_bw() +
+  #add 1 inch white space to right of graph
   theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=14),
         axis.text.y=element_text(size=14),
         axis.title.x=element_text(size=18),
         axis.title.y=element_text(size=18),
         legend.text=element_text(size=12),
         legend.position="top",
-        legend.title = element_blank())
+        legend.title = element_blank(),
+        plot.margin = unit(c(0, 0.6, 0, 0.5), "cm"))
 
-#ggsave(here("experiment", "figures", "mhw_adcp.png"), width = 20, height = 7)
+#ggsave(here("experiment", "figures", "mhw_year.png"), width=12, height=6)
 ```
 
+Plot daily variation
+```{r}
+mko_daily <- mko_adcp %>%
+  filter(!is.na(temp_adcp),
+         date >= ymd("2018-07-01") & date < ymd("2018-08-01")) %>%
+  mutate(date=as.Date(date)) %>%
+  select(date_time, temp_adcp)
+
+mko_event <- mko_daily %>%
+  left_join(mko_mhw, by=c("date_time"="t")) %>%
+  fill(event, threshCriterion) %>%
+  select(date_time, temp_adcp, event, threshCriterion)
+
+#m <- 
+ggplot(mko_event, aes(x = date_time, y=temp_adcp, color=threshCriterion, group=factor(c(0, cumsum(abs(head(threshCriterion, -1) != tail(threshCriterion, -1))))))) +
+  geom_line(alpha=0.9, size=0.7) +
+  scale_x_datetime(date_labels = "%b %d",
+                   breaks = scales::date_breaks("1 week"),
+                   expand=c(0,0),
+                   limits = c(min(mko_daily$date_time),
+                              max(mko_daily$date_time))) +
+  scale_y_continuous(limits = c(12, 19), breaks = seq(12, 19, by = 2)) +
+  scale_color_manual(values = c("#000000","#D55E00"),
+                      labels= c("No", "Yes")) +
+  labs(y = expression(paste("Temperature (", degree, "C)")),
+       x = "Date",
+       color = "Marine heatwave threshold") +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=14),
+        axis.text.y=element_text(size=14),
+        axis.title.x=element_text(size=18),
+        axis.title.y=element_text(size=18),
+        legend.position="top")
+
+ggsave(here("experiment", "figures", "mhw_month.png"), width=8, height=6)
+```
+
+#Plot the different timeframes together
+```{r}
+ggarrange(y + theme(axis.title.x = element_blank()),
+          m + theme(axis.title.x = element_blank()), 
+          #labels = c("MKO", "ARQ"),
+  common.legend = FALSE, legend = "bottom",
+  ncol = 1, nrow = 2, 
+  label.x=0.05, label.y=0.95, font.label=list(color="black",size=20))
+
+#ggsave(here("experiment", "figures", "mhw_both.png"), width=14, height=7)
+```
