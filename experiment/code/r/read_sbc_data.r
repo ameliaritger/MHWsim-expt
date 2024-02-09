@@ -1,7 +1,9 @@
-# this code is a function that used to read the data from the SBC data package
-setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+library(here)
 
-dt <- read.csv("vw_timeseries_entities.csv",stringsAsFactors = FALSE)
+# this code is a function that used to read the data from the SBC data package
+rm(list = ls())
+
+dt <- read.csv(here("experiment", "data", "vw_timeseries_entities.csv"),stringsAsFactors = FALSE)
 
 read_sbc_data<-function(namein)
 {

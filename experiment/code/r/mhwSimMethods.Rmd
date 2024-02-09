@@ -1,0 +1,215 @@
+---
+title: "Plotting SBC LTER data for MHWsim Methods Publication"
+author: "Amelia Ritger"
+date: "2022-08-05"
+output: html_document
+---
+
+#Load packages
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(janitor)
+library(here)
+library(lubridate)
+library(scales) #date_format for x axis plot
+library(heatwaveR)
+library(ggpubr) #combine multiple ggplots
+library(data.table)
+library(EDIutils)
+library(xml2)
+library(chron) #convert decimal time
+```
+
+```{r}
+source(here("experiment", "code", "r", "read_sbc_data.r"))
+```
+
+#HOBO data
+## Download and format data
+```{r}
+mko_hobo <- read_sbc_data("Reef bottom water temperature - Bottom water temperature, all years") %>%
+  clean_names() %>%
+  mutate(year=format(date_local, '%Y'), #create only year column
+         month=format(date_local, '%m')) %>% #create only month column
+  unite("date_time", "date_local", "time_local", sep=" ", remove=FALSE) %>%
+  mutate(date_time=ymd_hms(date_time)) %>% #apply lubridate to date and time
+  arrange(date_time)
+
+mko <- mko_hobo %>%
+    filter(site %in% c("NAPL"))
+
+max_mko <- max(mko$temp_c)
+min_mko <- min(mko$temp_c)
+
+#plot it up
+ggplot(mko, aes(x = date_time, y = temp_c)) +
+  geom_point() +
+  labs(x = "Time", y = "Bottom Temperature") +
+  scale_x_datetime(breaks = scales::date_breaks("9 months"),
+                   labels = date_format("%b %Y")) +
+  scale_y_continuous(limits = c(8, 24), breaks = seq(9, 24, by = 5)) +
+  theme_classic()
+```
+
+## Assess MHW
+```{r}
+# Reformat df to run heatwaveR
+mko_heatwaver <- mko %>%
+  group_by(date_local) %>%
+  summarize(temp_c=mean(temp_c)) %>%
+  mutate(date=as.Date(date_local)) %>%
+  rename(t=date_local,
+         temp=temp_c) %>%
+  select(t, temp)
+
+#identify start and end dates of df
+head(mko_heatwaver)
+tail(mko_heatwaver)
+
+mhw_start_date <- "2002-08-16"
+mhw_end_date <- "2023-06-26"
+
+# Detect the events in a time series
+ts <- heatwaveR::ts2clm(mko_heatwaver, x=t, y=temp, climatologyPeriod = c(mhw_start_date, mhw_end_date))
+mhw <- heatwaveR::detect_event(ts)
+
+#identify MHW events
+mhw$event %>%
+   dplyr::ungroup() %>%
+   dplyr::select(event_no, duration, date_start, date_peak, date_end, intensity_max, intensity_mean, intensity_cumulative) %>%
+   dplyr::arrange(-duration)
+
+#identify dates of interest
+climatology <- mhw$climatology %>%
+  arrange(t)
+  
+mhw_start <- which(climatology$t == "2014-01-01")[1]
+mhw_end <- which(climatology$t == "2016-02-29")[1]
+
+#subset for dates of interest
+mko_mhw <- mhw$climatology %>%
+  slice(mhw_start:mhw_end)
+
+#plot clean ribbon
+ggplot(mko_mhw, aes(x = t, ymax = pmax(thresh, temp), ymin = thresh)) +
+  geom_line(aes(y = seas, colour = "seas"), size = 0.8) +
+  geom_ribbon(fill = "red") +
+  geom_line(aes(y = thresh, colour = "thresh"), size = 0.8) +
+  geom_line(aes(y = temp, colour = "temp"), alpha=0.3) +
+  #geom_text(size = 12, colour = "black", aes(x = as.Date("2014-02-01"), y = 24, label = "MKO")) +
+  #geom_line(aes(y = seas, colour = "seas"), size = 0.8, linetype="dashed") +
+  scale_colour_manual(name = "Line Colour",
+                      values = c("seas" = "dodgerblue4",
+                                 "temp" = "black", 
+                                 "thresh" =  "chartreuse4"),
+                      labels= c("Climatology", "Temperature", "Threshold")) +
+  scale_x_date(date_labels = "%b %Y",
+               breaks = scales::date_breaks("6 months"),
+               expand=c(0,0),
+               limits = c(min(mko_mhw$t), 
+                         max = max(mko_mhw$t))) +
+  scale_y_continuous(limits = c(11, 26), breaks = seq(11, 26, by = 2)) +
+  guides(colour = guide_legend(override.aes = list(fill = NA))) +
+  labs(y = expression(paste("Temperature (", degree, "C)")),
+       x = "Date") +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=14),
+        axis.text.y=element_text(size=14),
+        axis.title.x=element_text(size=18),
+        axis.title.y=element_text(size=18),
+        legend.text=element_text(size=12),
+        legend.position="top",
+        legend.title = element_blank())
+
+#ggsave(here("experiment", "figures", "mhw_hoboNAP.png"), width = 20, height = 7)
+```
+
+#ADCP data
+## Download and format data
+```{r}
+mko_adcp <- read_sbc_data("Moored CTD and ADCP: NAP - Moored CTD and ADCP at Naples Reef NAP") %>%
+  clean_names() %>%
+  select(year, month, day, decimal_time, temp_adcp, temp_top, temp_mid, temp_bot) %>%
+  mutate(date=ymd(paste(year, month, day)),
+         time=format(times(decimal_time))) %>%
+  unite(date_time, c(date, time), sep = " ", remove = FALSE) %>% # combine the date and time columns
+  mutate(date_time=ymd_hms(date_time)) %>%
+  arrange(date_time)
+```
+
+## Assess MHW
+```{r}
+# Reformat df to run heatwaveR
+mko_heatwaver <- mko_adcp %>%
+  group_by(date) %>%
+  filter(!is.na(temp_mid)) %>%
+  summarize(temp_c=mean(temp_mid)) %>%
+  mutate(date=as.Date(date)) %>%
+  rename(t=date,
+         temp=temp_c) %>%
+  select(t, temp)
+
+#identify start and end dates of df
+head(mko_heatwaver)
+tail(mko_heatwaver)
+
+mhw_start_date <- "2001-02-14"
+mhw_end_date <- "2023-04-11"
+
+# Detect the events in a time series
+ts <- heatwaveR::ts2clm(mko_heatwaver, x=t, y=temp, climatologyPeriod = c(mhw_start_date, mhw_end_date))
+mhw <- heatwaveR::detect_event(ts)
+
+# identify MHW events
+mhw$event %>%
+   dplyr::ungroup() %>%
+   dplyr::select(event_no, duration, date_start, date_peak, date_end, intensity_max, intensity_mean, intensity_cumulative) %>%
+   dplyr::arrange(-duration)
+
+#identify dates of interest
+climatology <- mhw$climatology %>%
+  arrange(t)
+  
+mhw_start <- which(climatology$t == "2014-01-01")[1]
+mhw_end <- which(climatology$t == "2016-02-29")[1]
+
+#subset for dates of interest
+mko_mhw <- mhw$climatology %>%
+  slice(mhw_start:mhw_end)
+
+#plot clean ribbon
+ggplot(mko_mhw, aes(x = t, ymax = pmax(thresh, temp), ymin = thresh)) +
+  geom_line(aes(y = seas, colour = "seas"), size = 0.8) +
+  geom_ribbon(fill = "red") +
+  geom_line(aes(y = thresh, colour = "thresh"), size = 0.8) +
+  geom_line(aes(y = temp, colour = "temp"), alpha=0.3) +
+  #geom_text(size = 12, colour = "black", aes(x = as.Date("2014-02-01"), y = 24, label = "MKO")) +
+  #geom_line(aes(y = seas, colour = "seas"), size = 0.8, linetype="dashed") +
+  scale_colour_manual(name = "Line Colour",
+                      values = c("seas" = "dodgerblue4",
+                                 "temp" = "black", 
+                                 "thresh" =  "chartreuse4"),
+                      labels= c("Climatology", "Temperature", "Threshold")) +
+  scale_x_date(date_labels = "%b %Y",
+               breaks = scales::date_breaks("6 months"),
+               expand=c(0,0),
+               limits = c(min(mko_mhw$t), 
+                         max = max(mko_mhw$t))) +
+  scale_y_continuous(limits = c(11, 26), breaks = seq(11, 26, by = 2)) +
+  guides(colour = guide_legend(override.aes = list(fill = NA))) +
+  labs(y = expression(paste("Temperature (", degree, "C)")),
+       x = "Date") +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=14),
+        axis.text.y=element_text(size=14),
+        axis.title.x=element_text(size=18),
+        axis.title.y=element_text(size=18),
+        legend.text=element_text(size=12),
+        legend.position="top",
+        legend.title = element_blank())
+
+#ggsave(here("experiment", "figures", "mhw_adcp.png"), width = 20, height = 7)
+```
+
