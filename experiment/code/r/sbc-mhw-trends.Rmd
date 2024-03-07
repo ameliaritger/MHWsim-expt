@@ -21,7 +21,7 @@ library(EDIutils) #to download LTER data
 library(xml2) #to open LTER xlsx data
 
 source("read_sbc_data.r")
-dt <- read.csv("vw_timeseries_entities.csv",stringsAsFactors = FALSE)
+dt <- read.csv(here("experiment", "data", "vw_timeseries_entities.csv") ,stringsAsFactors = FALSE)
 dsname <- "Moored CTD and ADCP: NAP - Moored CTD and ADCP at Naples Reef NAP"
 ```
 
@@ -420,7 +420,7 @@ all_data <- all_clean %>% #make sure you re-run code above naming mhw_event appr
   reduce(full_join)
 
 mhw_profile <- temp_clean %>% #or use "all_data"
-  filter(date>=ymd("2015-08-01") & date<ymd("2016-04-01")) %>%
+  filter(date>=ymd("2015-03-06") & date<ymd("2015-03-15")) %>% #date>=ymd("2015-08-01") & date<ymd("2016-04-01")
   mutate(t = date,
          time=format(times(decimal_time))) %>%
   unite(date_time, c(t, time), sep = " ", remove = TRUE) %>% # combine the date and time columns
@@ -430,6 +430,9 @@ mhw_profile <- temp_clean %>% #or use "all_data"
   select(date_time, temp) %>%
   mutate(t=date(date_time))
 
+# save mhw_profile as .csv file using read_csv
+write_csv(mhw_profile, here("experiment", "data", "2015mhw_profile.csv"))
+
 #mhw_profile <- nap_clean %>%
 #    filter(date>=ymd("2015-08-15") & date<ymd("2016-03-01")) %>%
 #    mutate(t = date,
@@ -438,7 +441,7 @@ mhw_profile <- temp_clean %>% #or use "all_data"
 #    mutate(date_time=ymd_hms(date_time))
   
 ggplot(mhw_profile, aes(x=date_time)) +
-  geom_point(aes(y=temp), color="orange")
+  geom_point(aes(y=temp), color="black")
   #geom_point(aes(y=chill), color="blue")
 ```
 
