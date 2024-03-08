@@ -8,6 +8,13 @@ import Memory as mem
 import SensorAverage as savg
 import CleanUp as clean
 
+#heater set to 25/20, 20/18, 18/16 is TOO HOT
+#10:30AM 5/8, chiller increased from 10/14C to 13/15C
+#12:15 5/8, chiller increased to 57/59
+#next step, reduce to only 2 tanks and pump chilled water to heating tank
+
+#min temp is 58F, max temp is 60F
+
 def mhw_sim():
     # Read the CSV file and convert to dictionary
     temp_profile = pd.read_csv("2015mhw_profile.csv", skiprows=1, usecols=[0,1], names=["datetime", "temp"])
@@ -59,6 +66,7 @@ def mhw_sim():
             temp_set = temp_profile[closest_datetime] #Extract the temperature values from the closest date and time
             print(f"The current temperature set point is: {temp_set}")
             avg_temps_all, avg_temps = savg.get_avg_temp(temp_ctrl, sleep_repeat)
+            avg_temps[:] = [round(num, 2) for num in avg_temps] #round avg tank temperatures to 2 decimal places
             hot_set = temp_set[0]
             temp_set = [hot_set]
             if avg_temps[0] > temp_set[0]: #if the tank is too hot
@@ -77,10 +85,10 @@ def mhw_sim():
                 io_inst.heat(1, 0) #turn the hot pump off
                 heater_status.append("off")
             sump_temps, avg_temps_all, heater_status, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all, sump_temps)
-            if avg_temps[1] > 25: #if the heater tank is too hot
+            if avg_temps[1] > (temp_set[0]+2): #if the heater tank is too hot
                 io_inst.heat(2, 0) #turn the heaters off
                 print(f"Heaters off")
-            elif avg_temps[1] > 20:
+            elif avg_temps[1] > temp_set[0]:
                 io_inst.heat(2, 0) #keep the heaters off
                 print(f"Heaters staying off")
             else:
