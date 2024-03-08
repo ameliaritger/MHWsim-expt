@@ -1,0 +1,47 @@
+---
+title: "RPi ALL data visualization - For METHODS paper"
+author: "Amelia Ritger"
+date: "2023-08-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+library(lubridate)
+library(janitor)
+```
+
+# Load data and merge all temp files
+```{r}
+rm(list = ls())
+#temp_files <- list.files(here("experiment", "data", "rpi"), pattern=".*csv")
+temp_files <- list.files(here("experiment", "code", "python", "methodsPub", "external"), pattern=".*csv")
+temp_all <- data.frame()
+for (i in 1:length(temp_files)){
+  print(temp_files[i])
+  temp_data <- read_csv(here("experiment", "code", "python", "methodsPub", "external", temp_files[i])) #each file will be read in, specify which columns you need read in to avoid any error
+  temp_all <- rbind(temp_all, temp_data) #for each iteration, bind the new data to the building dataset
+}
+temp_all <- temp_all %>%
+  clean_names() %>%
+  select(1:10)
+```
+
+# Plot tank temps
+```{r}
+temp_clean <- temp_all %>%
+  mutate(timestamp = ymd_hms(timestamp)) %>%
+  select(-(last_col(offset=3):last_col()), #%>% #remove sump tank temps
+         -heater_status) %>%
+  pivot_longer(cols=3:5, names_to = "sensor", values_to = "temperature") %>%
+  filter(timestamp > ymd_hms("2024-03-07 15:00:00"))
+
+ggplot(temp_clean, aes(x=timestamp)) +
+  geom_line(aes(y=temperature, color=sensor), size=1) +
+  geom_line(aes(y=temp_set), color="black")
+
+#ggsave(here("figures", "chill-old-new.png"))
+```
