@@ -15,7 +15,7 @@ library(janitor)
 ```
 
 # Load data and merge all temp files
-```{r}
+```{r, message=FALSE, warning=FALSE}
 rm(list = ls())
 #temp_files <- list.files(here("experiment", "data", "rpi"), pattern=".*csv")
 temp_files <- list.files(here("experiment", "code", "python", "methodsPub", "external"), pattern=".*csv")
@@ -37,10 +37,24 @@ temp_clean <- temp_all %>%
   select(-(last_col(offset=3):last_col()), #%>% #remove sump tank temps
          -heater_status) %>%
   pivot_longer(cols=3:5, names_to = "sensor", values_to = "temperature") %>%
-  filter(timestamp > ymd_hms("2024-03-07 15:00:00"))
+  filter(timestamp > ymd_hms("2024-03-07 15:55:00"))
 
 ggplot(temp_clean, aes(x=timestamp)) +
   geom_line(aes(y=temperature, color=sensor), size=1) +
+  geom_line(aes(y=temp_set), color="black")
+
+temp_avg <- temp_all %>%
+  mutate(timestamp = ymd_hms(timestamp)) %>%
+  select(-(last_col(offset=3):last_col()), #%>% #remove sump tank temps
+         -heater_status) %>%
+  pivot_longer(cols=3:5, names_to = "sensor", values_to = "temperature") %>%
+  group_by(timestamp, temp_set) %>%
+  summarise(avg_temp = mean(temperature)) %>%
+  ungroup() %>%
+  filter(timestamp > ymd_hms("2024-03-07 15:55:00"))
+
+ggplot(temp_avg, aes(x=timestamp)) +
+  geom_line(aes(y=avg_temp), color="blue", size=1) +
   geom_line(aes(y=temp_set), color="black")
 
 #ggsave(here("figures", "chill-old-new.png"))
