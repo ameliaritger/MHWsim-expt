@@ -13,7 +13,7 @@ import CleanUp as clean
 #12:15 5/8, chiller increased to 57/59
 #2:45 changed temp comparison to 0.04 threshold rather than "too hot/too cold"
 #4:10 reduced to 0.01 threshold
-#next step, reduce to only 2 tanks and pump chilled water to heating tank
+#5:30, reduced to only 2 tanks and pumping chilled water to heating tank
 
 #min temp is 58F, max temp is 60F
 
@@ -71,39 +71,25 @@ def mhw_sim():
             avg_temps[:] = [round(num, 2) for num in avg_temps] #round avg tank temperatures to 2 decimal places
             hot_set = temp_set[0]
             temp_set = [hot_set]
-            if abs(avg_temps[0]-temp_set[0]) <= 0.01: #if the tank is within 0.05C away from the set point
-                print(f"Tank perfect temperature!")
-                io_inst.heat(0, 0) #turn the cold pump off
-                io_inst.heat(1, 0) #turn the hot pump off
-                heater_status.append("off")
-            elif (avg_temps[0]-temp_set[0])>0.01: #if the tank is too hot
+            if avg_temps[0] > temp_set[0]: #if the tank is too hot
                 print(f"Tank too hot!")
-                io_inst.heat(1, 0) #turn the hot pump off
+                io_inst.heat(2, 0) #turn the heaters off
                 io_inst.heat(0, 1) #turn the cold pump on
                 heater_status.append("off")
-            elif (avg_temps[0] - temp_set[0])<-0.01: #if the tank is too cold
+            elif avg_temps[0] < temp_set[0]: #if the tank is too cold
                 print(f"Tank too cold!")
                 io_inst.heat(0, 0) #turn the cold pump off
-                io_inst.heat(1, 1) #turn the hot pump on
+                io_inst.heat(2, 1) #turn the heaters on
                 heater_status.append("on")
             else: #if the temperature is just right
-                print(f"WHAT IS GOING ON")
+                print(f"Tank perfect temperature!")
                 io_inst.heat(0, 0) #turn the cold pump off
-                io_inst.heat(1, 0) #turn the hot pump off
+                io_inst.heat(2, 0) #turn the heaters off
                 heater_status.append("off")
             sump_temps, avg_temps_all, heater_status, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all, sump_temps)
-            if avg_temps[1] > (temp_set[0]+2): #if the heater tank is too hot
-                io_inst.heat(2, 0) #turn the heaters off
-                print(f"Heaters off")
-            elif avg_temps[1] > temp_set[0]:
-                io_inst.heat(2, 0) #keep the heaters off
-                print(f"Heaters staying off")
-            else:
-                io_inst.heat(2, 1) #turn the heaters on
-                print(f"Heaters on")
         else:
             time.sleep(sleep_repeat)
-
+            
     #Finish the experiment, turn everything off!
     heater_state = 0
     for heater_num in range(len(control_pins)):

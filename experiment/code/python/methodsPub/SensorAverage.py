@@ -31,9 +31,7 @@ def get_avg_temp(temp_ctrl, sleep_repeat):
     avg_hot = all_temps_df[all_temps_df.columns.intersection(sinfo.hot_tank)].mean().mean()
     avg_no = all_temps_df[all_temps_df.columns.intersection(sinfo.no_tank)].mean().mean()
     print(f"The mixing tank temp average is {avg_mix}")
-    print(f"The hot tank temp average is {avg_hot}")
     print(f"The cold tank temp average is {avg_cold}")
-    print(f"The no tank temp average is {avg_no}")
     avg_temps = [avg_mix, avg_hot, avg_cold, avg_no] #create list of average temperatures for each tank
     all_temps = all_temps_df.mean(axis=0).apply(lambda x: round(x,3)).tolist() #create a list of the mean average temps for each sensor, rounded to 3 digits
     all_temps = all_temps[:7] #remove no_tank
