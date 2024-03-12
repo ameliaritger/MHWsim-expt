@@ -36,10 +36,10 @@ temp_all <- temp_all %>%
 ```{r}
 temp_clean <- temp_all %>%
   mutate(timestamp = ymd_hms(timestamp)) %>%
-  select(-(9:10),
+  select(-(8:10),
 # (last_col(offset=3):last_col()), #%>% #remove sump tank temps
          -heater_status) %>%
-  pivot_longer(cols=3:7, names_to = "sensor", values_to = "temperature") %>%
+  pivot_longer(cols=3:6, names_to = "sensor", values_to = "temperature") %>%
   filter(timestamp > ymd_hms("2024-03-10 15:30:00"))
          timestamp < ymd_hms("2024-03-09 17:30:00"))
 
@@ -52,9 +52,9 @@ ggplot(temp_clean, aes(x=timestamp)) +
 ```{r}
 temp_avg <- temp_all %>%
   mutate(timestamp = ymd_hms(timestamp)) %>%
-  select(-(9:10)) %>%
+  select(-(8:10)) %>%
   #select(-(last_col(offset=3):last_col())) %>% #%>% #remove sump tank temps) %>%
-  pivot_longer(cols=4:8, names_to = "sensor", values_to = "temperature") %>%
+  pivot_longer(cols=4:7, names_to = "sensor", values_to = "temperature") %>%
   group_by(timestamp, temp_set, heater_status) %>%
   summarise(avg_temp = mean(temperature)) %>%
   ungroup() %>%
