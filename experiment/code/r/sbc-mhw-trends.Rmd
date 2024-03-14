@@ -453,8 +453,8 @@ start_date <- as.Date("2015-03-16")
 initial_temp <- 18
 ramp_rate <- 2  # temperature change per day (in degrees Celsius)
 # Create time sequence for 2 days with 1-minute intervals
-time_seq <- seq(as.POSIXct(paste0(start_date, " 00:00:00")), 
-                 as.POSIXct(paste0(start_date, " 23:59:00")), by = "1 min")
+time_seq <- seq(as.POSIXct(paste0(start_date, " 09:00:00")), 
+                 as.POSIXct(paste0(start_date+1, " 08:59:00")), by = "1 min")
 # Calculate total number of time points
 num_points <- length(time_seq)
 # Calculate daily temperature change based on ramp rate
@@ -466,8 +466,8 @@ end_date <- as.Date("2015-03-17")
 initial_temp <- 20
 ramp_rate <- 2  # temperature change per day (in degrees Celsius)
 # Create time sequence for 2 days with 1-minute intervals
-time_seq <- seq(as.POSIXct(paste0(end_date, " 00:00:00")), 
-                 as.POSIXct(paste0(end_date, " 23:59:00")), by = "1 min")
+time_seq <- seq(as.POSIXct(paste0(end_date, " 09:00:00")), 
+                 as.POSIXct(paste0(end_date+1, " 08:59:00")), by = "1 min")
 # Calculate total number of time points
 num_points <- length(time_seq)
 # Calculate daily temperature change based on ramp rate
