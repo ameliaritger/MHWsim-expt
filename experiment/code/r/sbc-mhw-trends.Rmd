@@ -420,7 +420,7 @@ all_data <- all_clean %>% #make sure you re-run code above naming mhw_event appr
   reduce(full_join)
 
 mhw_profile <- temp_clean %>% #or use "all_data"
-  filter(date>=ymd("2015-03-06") & date<ymd("2015-03-15")) %>% #date>=ymd("2015-08-01") & date<ymd("2016-04-01")
+  filter(date>=ymd("2015-03-12") & date<ymd("2015-03-18")) %>% #date>=ymd("2015-08-01") & date<ymd("2016-04-01")
   mutate(t = date,
          time=format(times(decimal_time))) %>%
   unite(date_time, c(t, time), sep = " ", remove = TRUE) %>% # combine the date and time columns
@@ -443,6 +443,42 @@ write_csv(mhw_profile, here("experiment", "data", "2015mhw_profile.csv"))
 ggplot(mhw_profile, aes(x=date_time)) +
   geom_point(aes(y=temp), color="black")
   #geom_point(aes(y=chill), color="blue")
+```
+
+#Create fake data for MHW Methods paper
+```{r}
+# Define start and end date (March 16th - 17th)
+start_date <- as.Date("2015-03-16")
+# Define temperature profile
+initial_temp <- 18
+ramp_rate <- 2  # temperature change per day (in degrees Celsius)
+# Create time sequence for 2 days with 1-minute intervals
+time_seq <- seq(as.POSIXct(paste0(start_date, " 00:00:00")), 
+                 as.POSIXct(paste0(start_date, " 23:59:00")), by = "1 min")
+# Calculate total number of time points
+num_points <- length(time_seq)
+# Calculate daily temperature change based on ramp rate
+temperature_change <- ramp_rate / num_points
+# Create a linear temperature profile that ramps up at the ramp_rate on day 1, and then ramps down at the ramp_rate on day 2
+temp_profile_up <- tibble(date_time = time_seq, temp = initial_temp + seq_along(time_seq) * temperature_change)
+
+end_date <- as.Date("2015-03-17")
+initial_temp <- 20
+ramp_rate <- 2  # temperature change per day (in degrees Celsius)
+# Create time sequence for 2 days with 1-minute intervals
+time_seq <- seq(as.POSIXct(paste0(end_date, " 00:00:00")), 
+                 as.POSIXct(paste0(end_date, " 23:59:00")), by = "1 min")
+# Calculate total number of time points
+num_points <- length(time_seq)
+# Calculate daily temperature change based on ramp rate
+temperature_change <- ramp_rate / num_points
+# Create a linear temperature profile that ramps up at the ramp_rate on day 1, and then ramps down at the ramp_rate on day 2
+temp_profile_down <- tibble(date_time = time_seq, temp = initial_temp - seq_along(time_seq) * temperature_change)
+
+# combine the two profiles
+fake_temp <- bind_rows(temp_profile_up, temp_profile_down)
+# Combine time and temperature into a dataframe
+write_csv(fake_temp, here("experiment", "data", "fake_data.csv"))
 ```
 
 # Extract the seasonal climatology data
