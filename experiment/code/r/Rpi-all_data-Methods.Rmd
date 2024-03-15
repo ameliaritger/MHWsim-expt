@@ -14,6 +14,9 @@ library(lubridate)
 library(janitor)
 ```
 
+#ONLY KEEP DATA SINCE 03/13 11:00:00 (that's when I fixed the PID loop)
+#I did a small PID loop adjustment at 13:00:00 but it shouldn't significantly affect the plot
+
 # Load data and merge all temp files
 ```{r, message=FALSE, warning=FALSE}
 rm(list = ls())
@@ -29,19 +32,17 @@ for (i in 1:length(temp_files)){
 
 temp_all <- temp_all %>%
   clean_names() %>%
-  select(1:10)
+  select(1:8)
 ```
 
 # Plot tank temps
 ```{r}
 temp_clean <- temp_all %>%
   mutate(timestamp = ymd_hms(timestamp)) %>%
-  select(-(8:10),
-# (last_col(offset=3):last_col()), #%>% #remove sump tank temps
+  select(!last_col(offset=1):last_col(), #%>% #remove hot/cold tank temps
          -heater_status) %>%
-  pivot_longer(cols=3:6, names_to = "sensor", values_to = "temperature") %>%
-  filter(timestamp > ymd_hms("2024-03-10 15:30:00"))
-         timestamp < ymd_hms("2024-03-09 17:30:00"))
+  pivot_longer(cols=3:5, names_to = "sensor", values_to = "temperature") %>%
+  filter(timestamp > ymd_hms("2024-03-13 11:00:00"))
 
 ggplot(temp_clean, aes(x=timestamp)) +
   geom_line(aes(y=temperature, color=sensor), size=1) +
@@ -52,17 +53,27 @@ ggplot(temp_clean, aes(x=timestamp)) +
 ```{r}
 temp_avg <- temp_all %>%
   mutate(timestamp = ymd_hms(timestamp)) %>%
-  select(-(8:10)) %>%
-  #select(-(last_col(offset=3):last_col())) %>% #%>% #remove sump tank temps) %>%
-  pivot_longer(cols=4:7, names_to = "sensor", values_to = "temperature") %>%
+  select(!last_col(offset=1):last_col()) %>%
+  pivot_longer(cols=4:6, names_to = "sensor", values_to = "temperature") %>%
   group_by(timestamp, temp_set, heater_status) %>%
   summarise(avg_temp = mean(temperature)) %>%
   ungroup() %>%
-  filter(timestamp > ymd_hms("2024-03-10 15:30:00"))
+  filter(timestamp > ymd_hms("2024-03-13 21:00:00"))
 
-ggplot(temp_avg, aes(x=timestamp)) +
-  geom_line(aes(y=avg_temp), color="blue", size=1) +
-  geom_line(aes(y=temp_set), color="black")
+temp_five <- temp_all %>%
+  mutate(timestamp = ymd_hms(timestamp),
+         timestamp = floor_date(timestamp, "1 minute")) %>%
+  select(!last_col(offset=1):last_col()) %>%
+  pivot_longer(cols=4:6, names_to = "sensor", values_to = "temperature") %>%
+  group_by(timestamp, temp_set) %>%
+  summarise(avg_temp = mean(temperature)) %>%
+  ungroup() %>%
+  filter(timestamp > ymd_hms("2024-03-13 11:00:00"))
+  
+ggplot(temp_five, aes(x=timestamp)) +
+  geom_line(aes(y=avg_temp), color="#0072B2", size=1) +
+  geom_line(aes(y=temp_set), color="#000000", size=1, alpha=0.7)
+  #geom_point(aes(y=avg_temp, color=heater_status), size=2) +
 
 #ggsave(here("figures", "chill-old-new.png"))
 ```
