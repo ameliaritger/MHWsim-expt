@@ -25,22 +25,32 @@ import PID
 #12:00 removed the "cold" sensor from mix tank because it's fucked, added chiller on flag, increased chillers from 56 to 57
 #16:30 no longer round values, maybe that will help with overshoot?
 #17:15 removed 5 probes (faster?) and changed sampling to once every 15 seconds where possible
+#18:10 Remove NO TANK from data (aka not compatible with previous temps now), remove flag for chill water because sampling is faster now, and remove duplicate probes in hot/cold tanks
+#3/13 8:00 remove PID
+# 8:50 added back in PID with better thresholds
+# 9:40 decreased Kp to 0.9 and changed directionality of PID value
 
-#min temp is 58F, max temp is 60F
+#CHILLER SET TEMPS
+#For blob: min temp is 58F, max temp is 60F
+#For simple: min temp is 63F, max temp is 66
+
+#3/17 increase pid hot set point to 0 and chill to 0.005 from -0.01 and 0.007, increase hot tank to +2 from +1
+#11:20 reduce hot tank from +0.5C to +0.3C
 
 def mhw_sim():
     # Read the CSV file and convert to dictionary
-    temp_profile = pd.read_csv("2015mhw_profile.csv", skiprows=1, usecols=[0,1], names=["datetime", "temp"])
-    temp_profile["datetime"] = temp_profile["datetime"].apply(lambda x: pd.to_datetime(x) + pd.Timedelta(days=365.25 * 9)) #convert datetime column to dates and times, then add 9 years to make it 2024
-    temp_profile["datetime"] = temp_profile["datetime"].dt.tz_localize(None) #Remove the timezone from datetime
+    temp_profile = pd.read_csv("fake_data.csv", skiprows=1, usecols=[0,1], names=["datetime", "temp"])
+    temp_profile["datetime"] = temp_profile["datetime"].apply(lambda x: pd.to_datetime(x) + pd.Timedelta(days=365.25 * 9, hours=19)) #convert datetime column to dates and times, then add 9 years to make it 2024; also convert UTC with hours (whoops didn't do this for experiment)
+    temp_profile["datetime"] = temp_profile["datetime"].dt.tz_convert(None) #Remove the timezone from datetime
     temp_profile = dict([(i,[x]) for i,x in zip(temp_profile["datetime"], temp_profile["temp"])])
+    print(temp_profile)
 
     m = mem.MEM("./local/","./external/") #storage locations on RPi
 
     #Initialize temperature sensors
     base_dir = '/sys/bus/w1/devices/'            #directory where thermistor files are populated
     device_folders = glob.glob(base_dir + '28*') #get list of all thermistor folders
-    sensors_to_remove = ['/sys/bus/w1/devices/28-00000eb50e10', '/sys/bus/w1/devices/28-00000eb52c32', '/sys/bus/w1/devices/28-00000eb4619b', '/sys/bus/w1/devices/28-00000eb3f54e', '/sys/bus/w1/devices/28-00000eb496d2', '/sys/bus/w1/devices/28-00000eb501b0'] #remove sensors not in use (speed up system) 
+    sensors_to_remove = ['/sys/bus/w1/devices/28-00000eb50e10', '/sys/bus/w1/devices/28-00000eb52c32', '/sys/bus/w1/devices/28-00000eb4619b', '/sys/bus/w1/devices/28-00000eb3f54e', '/sys/bus/w1/devices/28-00000eb496d2', '/sys/bus/w1/devices/28-00000eb501b0', '/sys/bus/w1/devices/28-00000eb3fd89', '/sys/bus/w1/devices/28-00000eb42add'] #remove sensors not in use (speed up system) 
     device_folders = [element for element in device_folders if element not in sensors_to_remove] #remove sensors not in use
     temp_ctrl = []                               #create empty list that we will populate with thermistor controllers
     num_therm = len(device_folders)              #calculate the number of thermistor pairs
@@ -49,7 +59,7 @@ def mhw_sim():
         ctrl = tm.TEMP(device_folders[index_num])        #create thermistor controller for a single pair
         temp_ctrl.append(ctrl)                   #add that thermistor controller to the list
 
-#Initialize variables and lists
+    #Initialize variables and lists
     hot_set = [0 for i in range(2)] #initialize variables set to zero
     temp_set, heater_status, sump_temps = ([] for i in range(3)) #initialize blank list for treatment temperature set points and heater statuses
 
@@ -57,22 +67,22 @@ def mhw_sim():
 
     #Initialize MHW parameters
     today = datetime.datetime.today() #date and time for today
-    mhw_end = datetime.datetime(2024, 4, 1) #date of end of "experiment"
-    chill_on = False #initialize flag
+    mhw_end = datetime.datetime(2024, 4, 1) #date of end of "experiment" (placeholder)
     
     #Initialize heater pins
     control_pins = [26, 20, 21] #20=LED2, #21=LED3, #26=LED1; #26 is cold pump, #20 is hot pump, #21 is heaters
     io_inst = io.IO_CTRL(control_pins)
-    temp_thresh = 1.5 
+    temp_thresh = 2 # set point + this value for hot tank max temp
     
     #initalize PID parameters
+    pid_value_cold = 0.005 # output > value #0.005 for 18C, 0.0145
+    pid_value_hot = 0 # output < value
     Kp = 1 #proportional gain, determines how fast the system responds
-    Ki = 0 #integral, determines how fast steady-state error is removed
+    Ki = 0.05 #integral, determines how fast steady-state error is removed
     Kd = 0 #derivative, determines how far into the future to predict rate of change
-    pid_value = 0 #initialize PID output threshold parameter
     error_integral = 0 #initialize error integral values
     error_derivative = 0 #initialize error derivative values
-    previous_temp = 15 #arbitrary, will be changed immediately after first loop
+    previous_temp = 18 # fairly arbitrary, will be changed immediately after first loop
     fo = 1/900 #calculated frequency of oscillation
 
     #option 1: heater in 20G tank and pump control into 5G tanks; chiller in 20G tank and pump control into 5G tanks
@@ -83,7 +93,7 @@ def mhw_sim():
     heater_state = 0
     for heater_pin in range(len(control_pins)):
         io_inst.heat(heater_pin, heater_state)
-        print(f"Sump tank {heater_pin} heater OFF")
+        print(f"Tank {heater_pin} pump OFF")
 
     while today < mhw_end:
         current_datetime = datetime.datetime.now() #Read the current date and time
@@ -99,20 +109,12 @@ def mhw_sim():
             temp_set = [hot_set]
             pid_out, previous_temp, error_integral, error_derivative = PID.control_temps(hot_set, avg_tank, previous_temp, error_integral, error_derivative, Kp, Ki, Kd)
             print(f"PID output is {pid_out}")
-            if pid_out < pid_value and avg_temps[0] > temp_set[0]: #if the tank is too hot
-                if not chill_on: #if the chiller hasn't already been on once - do this to control for getting too cold too fast
-                    chill_on = True #set flag to true
-                    print(f"Tank too hot!")
-                    io_inst.heat(1, 0) #turn the heater pump off
-                    io_inst.heat(0, 1) #turn the cold pump on
-                    heater_status.append("off")                    
-                else:
-                    chill_on = False #reset the flag
-                    print(f"Tank still too hot but let's chill out")
-                    io_inst.heat(1, 0) #turn the heater pump off
-                    io_inst.heat(0, 0) #turn the cold pump off
-                    heater_status.append("chill")
-            elif avg_temps[0] < temp_set[0]: #if the tank is too cold
+            if pid_out < pid_value_hot and avg_temps[0] > temp_set[0]: #if hot_flag=false and tank is too hot
+                print(f"Tank too hot!")
+                io_inst.heat(1, 0) #turn the heater pump off
+                io_inst.heat(0, 1) #turn the cold pump on
+                heater_status.append("off")
+            elif pid_out > pid_value_cold and avg_temps[0] < temp_set[0]: #chill_flag=false and tank is too cold
                 print(f"Tank too cold!")
                 io_inst.heat(0, 0) #turn the cold pump off
                 io_inst.heat(1, 1) #turn the heater pump on
@@ -121,12 +123,12 @@ def mhw_sim():
                 print(f"Tank perfect temperature!")
                 io_inst.heat(0, 0) #turn the cold pump off
                 io_inst.heat(1, 0) #turn the heater pump off
-                heater_status.append("off")
+                heater_status.append("stable")
             sump_temps, avg_temps_all, heater_status, today = clean.save_and_sleep(m, temp_set, heater_status, avg_temps_all, sump_temps)
             if avg_temps[1] > temp_set[0]+temp_thresh: #if heater tank is too hot
                 io_inst.heat(2,0) #turn the heaters off
                 print(f"Heater off")
-            elif avg_temps[1] > temp_set[0]:
+            elif avg_temps[1] > temp_set[0]+0.3:
                 io_inst.heat(2,0) #keep the heaters off
                 print(f"Heater staying off")
             else:
