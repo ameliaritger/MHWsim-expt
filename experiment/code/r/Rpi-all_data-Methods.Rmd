@@ -93,7 +93,7 @@ ggplot(temp_five, aes(x=timestamp)) +
         axis.title.y=element_text(size=18),
         legend.position="top")
 
-#ggsave(here("experiment", "figures", "2015blob.png"), width=12, height=6)
+#ggsave(here("experiment", "figures", "methodsPub", "2015blob.png"), width=12, height=6)
 ```
 
 ## Plot difference between "expected" and "observed"
@@ -125,7 +125,7 @@ ggplot(temp_diff, aes(x=timestamp)) +
         axis.title.y=element_text(size=18),
         legend.position="top")
 
-#ggsave(here("experiment", "figures", "blobDiff.png"), width=12, height=6)
+#ggsave(here("experiment", "figures", "methodsPub", "blobDiff.png"), width=12, height=6)
 ```
 
 # Conventional MHW data
@@ -161,11 +161,11 @@ ggplot(temp_simple, aes(x=timestamp)) +
   geom_point(aes(y=avg_temp), color="#D55E00", size=1) +
   geom_line(aes(y=temp_set), color="#000000", size=1.5, alpha=0.7) +
   scale_x_datetime(date_labels = "%b %d - %H:%M",
-                   breaks = scales::date_breaks("3 hours"),
+                   breaks = scales::date_breaks("6 hours"),
                    expand=c(0,0),
                    limits = c(min(temp_simple$timestamp),
                               max(temp_simple$timestamp))) +
-  #scale_y_continuous(limits = c(14.8, 15.8), breaks = seq(14.9, 15.8, by = 0.3)) +
+  scale_y_continuous(limits = c(17.8, 20.2), breaks = seq(18, 20, by = 0.5)) +
   labs(y = expression(paste("Temperature (", degree, "C)")),
        x = "Date and time") +
   theme_bw() +
@@ -175,7 +175,53 @@ ggplot(temp_simple, aes(x=timestamp)) +
         axis.title.y=element_text(size=18),
         legend.position="top")
 
-#ggsave(here("experiment", "figures", "simple.png"), width=12, height=6)
+#ggsave(here("experiment", "figures", "methodsPub", "simple.png"), width=12, height=6)
+```
+
+## Here is the "real" simple MHW data! (adjusting for differences in temp profile start times)
+```{r}
+temp_down <- temp_all %>%
+  mutate(timestamp = ymd_hms(timestamp)) %>%
+  filter(timestamp < ymd_hms("2024-03-18 15:54:00") | timestamp > ymd_hms("2024-03-18 15:57:00")) %>%
+  mutate(timestamp_posix = as.POSIXct(timestamp),
+         timestamp_posix_minus = timestamp_posix - ((3*60)) + 16,
+         timestamp = if_else(timestamp > ymd_hms("2024-03-18 15:53:44"), timestamp_posix_minus, timestamp_posix),
+         timestamp = floor_date(timestamp, "1 minute")) %>%
+  select(!last_col(offset=1):last_col()) %>%
+  pivot_longer(cols=4:6, names_to = "sensor", values_to = "temperature") %>%
+  group_by(timestamp, temp_set) %>%
+  summarise(avg_temp = mean(temperature)) %>%
+  ungroup() %>%
+  #remove datapoints between 2024-03-17 16:32:00 and 2024-03-17 16:57:00
+  filter(timestamp != ymd_hms("2024-03-17 16:32:00"),
+         timestamp > ymd_hms("2024-03-16 23:00:00"), #remove Blob data
+         timestamp > ymd_hms("2024-03-17 08:00:00"), #DELETE THIS WHEN DONE
+         timestamp < ymd_hms("2024-03-17 16:38:00") |
+           timestamp > ymd_hms("2024-03-17 17:02:00")) %>%
+  mutate(timestamp_posix = as.POSIXct(timestamp),
+         timestamp_posix_plus = timestamp_posix + (25 * 60),
+         timestamp = if_else(timestamp < ymd_hms("2024-03-17 17:03:00"), timestamp_posix_plus, timestamp_posix)) %>%
+  #remove the last 2 columns
+  select(!last_col(offset=1):last_col())
+
+ggplot(temp_down, aes(x=timestamp)) +
+  #geom_line(aes(y=avg_temp, color=heater_status), size=1) +
+  geom_point(aes(y=avg_temp), color="#D55E00", size=1) +
+  geom_line(aes(y=temp_set), color="#000000", size=1.5, alpha=0.7) +
+  scale_x_datetime(date_labels = "%b %d - %H:%M",
+                   breaks = scales::date_breaks("6 hours"),
+                   expand=c(0,0),
+                   limits = c(min(temp_simple$timestamp),
+                              max(temp_simple$timestamp))) +
+  scale_y_continuous(limits = c(17.8, 20.2), breaks = seq(18, 20, by = 0.5)) +
+  labs(y = expression(paste("Temperature (", degree, "C)")),
+       x = "Date and time") +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=14),
+        axis.text.y=element_text(size=14),
+        axis.title.x=element_text(size=18),
+        axis.title.y=element_text(size=18),
+        legend.position="top")
 ```
 
 ## Plot difference between "expected" and "observed"
@@ -200,7 +246,7 @@ ggplot(temp_diff_simple, aes(x=timestamp)) +
         axis.title.y=element_text(size=18),
         legend.position="top")
 
-#ggsave(here("experiment", "figures", "simpleDiff.png"), width=12, height=6)
+#ggsave(here("experiment", "figures", "methodsPub", "simpleDiff.png"), width=12, height=6)
 ```
 
 
