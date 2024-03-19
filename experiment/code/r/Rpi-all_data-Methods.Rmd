@@ -211,8 +211,8 @@ ggplot(temp_down, aes(x=timestamp)) +
   scale_x_datetime(date_labels = "%b %d - %H:%M",
                    breaks = scales::date_breaks("6 hours"),
                    expand=c(0,0),
-                   limits = c(min(temp_simple$timestamp),
-                              max(temp_simple$timestamp))) +
+                   limits = c(min(temp_down$timestamp),
+                              max(temp_down$timestamp))) +
   scale_y_continuous(limits = c(17.8, 20.2), breaks = seq(18, 20, by = 0.5)) +
   labs(y = expression(paste("Temperature (", degree, "C)")),
        x = "Date and time") +
@@ -222,12 +222,20 @@ ggplot(temp_down, aes(x=timestamp)) +
         axis.title.x=element_text(size=18),
         axis.title.y=element_text(size=18),
         legend.position="top")
+
+#ggsave(here("experiment", "figures", "methodsPub", "simple.png"), width=12, height=6)
 ```
 
 ## Plot difference between "expected" and "observed"
 ```{r}
-temp_diff_simple <- temp_simple %>%
+temp_diff_simple <- temp_down %>%
   mutate(diff = round(temp_set - avg_temp, 3))
+
+mean(temp_diff_simple$diff)
+sd(temp_diff_simple$diff)
+max(temp_diff_simple$diff)
+min(temp_diff_simple$diff)
+max(temp_diff_simple$diff)+abs(min(temp_diff_simple$diff))
 
 ggplot(temp_diff_simple, aes(x=timestamp)) +
   geom_point(aes(y=diff), color="#000000", size=1) +
@@ -236,7 +244,7 @@ ggplot(temp_diff_simple, aes(x=timestamp)) +
                    expand=c(0,0),
                    limits = c(min(temp_diff_simple$timestamp),
                               max(temp_diff_simple$timestamp))) +
-  scale_y_continuous(limits = c(-0.05, 0.05), breaks = seq(-0.05, 0.05, by = 0.02)) +
+  #scale_y_continuous(limits = c(-0.05, 0.05), breaks = seq(-0.05, 0.05, by = 0.02)) +
   labs(y = expression(paste("Temperature difference (", degree, "C)")),
        x = "Date and time") +
   theme_bw() +
