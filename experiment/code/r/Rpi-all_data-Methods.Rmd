@@ -182,7 +182,8 @@ ggplot(temp_simple, aes(x=timestamp)) +
 ```{r}
 temp_down <- temp_all %>%
   mutate(timestamp = ymd_hms(timestamp)) %>%
-  filter(timestamp < ymd_hms("2024-03-18 15:54:00") | timestamp > ymd_hms("2024-03-18 15:57:00")) %>%
+  filter(timestamp > ymd_hms("2024-03-17 13:00:00"),
+         timestamp < ymd_hms("2024-03-18 15:54:00") | timestamp > ymd_hms("2024-03-18 15:57:00")) %>%
   mutate(timestamp_posix = as.POSIXct(timestamp),
          timestamp_posix_minus = timestamp_posix - ((3*60)) + 16,
          timestamp = if_else(timestamp > ymd_hms("2024-03-18 15:53:44"), timestamp_posix_minus, timestamp_posix),
@@ -257,4 +258,60 @@ ggplot(temp_diff_simple, aes(x=timestamp)) +
 #ggsave(here("experiment", "figures", "methodsPub", "simpleDiff.png"), width=12, height=6)
 ```
 
+# Import HOBO data
+```{r}
+hobo_data <- read_csv(here("experiment", "data", "newAmeliaHobo 2024-03-19 10_04_08 PDT (Data PDT).csv")) %>% #each file will be read in, specify which columns you need read in to avoid any error
+  select(2:3) %>%
+  rename(timestamp = 1,
+         temperature = 2) %>%
+  mutate(timestamp = mdy_hms(timestamp),
+         timestamp = floor_date(timestamp, "1 minute")) %>%
+  group_by(timestamp) %>%
+  summarise(avg_temp = mean(temperature)) %>%
+  ungroup() %>%
+  mutate(avg_temp_sub = avg_temp - 0.22,
+         avg_temp = (avg_temp - min(avg_temp)) / (max(avg_temp) - min(avg_temp)) * (20 - 18) + 18) # calibrate the data so the maximum temp should be 20 and the minimum temp should be 18
+
+hobo_data_clean <- hobo_data %>%
+  rename(avg_temp_hobo = 2)
+
+#merge hobo_data_clean with temp_down
+temp_compare <- temp_down %>%
+  left_join(hobo_data_clean, by="timestamp") %>%
+  #remove NA rows
+  filter(!is.na(avg_temp_hobo))
+
+#get the difference between the two data
+temp_compare <- temp_compare %>%
+  mutate(diff = round(avg_temp - avg_temp_sub, 3))
+
+mean(temp_compare$diff)
+sd(temp_compare$diff)
+
+#calculate the number of hours between start and end of temp_compare
+hours <- as.numeric(difftime(max(temp_compare$timestamp), min(temp_compare$timestamp), units="hours"))
+
+#plot the data
+ggplot(temp_compare, aes(x=timestamp)) +
+  geom_point(aes(y=diff), color="black", size=1) +
+  #geom_point(aes(y=avg_temp_hobo), color="red", size=1) +
+  #geom_point(aes(y=avg_temp_sub), color="green", size=1) +
+  scale_x_datetime(date_labels = "%b %d - %H:%M",
+                   breaks = scales::date_breaks("6 hours"),
+                   expand=c(0,0),
+                   limits = c(min(hobo_data$timestamp),
+                              max(hobo_data$timestamp))) +
+  scale_y_continuous(limits = c(-0.045, 0.02), breaks = seq(-0.04, 0.02, by = 0.02)) +
+  labs(y = expression(paste("Temperature difference (", degree, "C)")),
+       x = "Date and time") +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=14),
+        axis.text.y=element_text(size=14),
+        axis.title.x=element_text(size=18),
+        axis.title.y=element_text(size=18),
+        legend.position="top")
+  
+#ggsave(here("experiment", "figures", "methodsPub", "hoboTempDiff.png"), width=12, height=6)
+
+```
 
