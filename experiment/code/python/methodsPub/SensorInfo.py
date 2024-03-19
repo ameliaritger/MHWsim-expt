@@ -1,8 +1,8 @@
 #Establish temperature sensor locations
-hot_tank = ["28-00000eb3cf7d", "28-00000eb42add"]
-cold_tank = ["28-00000eb5045f", "28-00000eb3fd89"]
+hot_tank = ["28-00000eb3cf7d"] # "28-00000eb42add"
+cold_tank = ["28-00000eb5045f"] # "28-00000eb3fd89"
 mix_tank = ["28-00000eb4cb62", "28-00000eb3e681", "28-00000eb51050"]
-no_tank = ["28-00000eb52c32", "28-00000eb50e10", "28-00000eb501b0", "28-00000eb496d2", "28-00000eb3f54e", "28-00000eb4619b"]
+#no_tank = ["28-00000eb52c32", "28-00000eb50e10", "28-00000eb501b0", "28-00000eb496d2", "28-00000eb3f54e", "28-00000eb4619b"]
 #"28-00000ec24f93", "28-00000ec23ab6", "28-00000ec25534", "28-00000eb4b7e0", "28-00000eb4a798", 
 
 #Establish temperature sensor calibration parameters

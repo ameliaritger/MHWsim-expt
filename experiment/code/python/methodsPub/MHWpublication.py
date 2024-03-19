@@ -36,11 +36,14 @@ import PID
 
 #3/17 increase pid hot set point to 0 and chill to 0.005 from -0.01 and 0.007, increase hot tank to +2 from +1
 #11:20 reduce hot tank from +0.5C to +0.3C
+#17:15 hot tnk increased from 0.3 to 0.4C
+#17:50 hot tank incerased from 0.4C to 0.5
+#18:20 hot tank decreased 0.5 to 0.45
 
 def mhw_sim():
     # Read the CSV file and convert to dictionary
     temp_profile = pd.read_csv("fake_data.csv", skiprows=1, usecols=[0,1], names=["datetime", "temp"])
-    temp_profile["datetime"] = temp_profile["datetime"].apply(lambda x: pd.to_datetime(x) + pd.Timedelta(days=365.25 * 9, hours=19)) #convert datetime column to dates and times, then add 9 years to make it 2024; also convert UTC with hours (whoops didn't do this for experiment)
+    temp_profile["datetime"] = temp_profile["datetime"].apply(lambda x: pd.to_datetime(x) + pd.Timedelta(days=365.25 * 9, hours=18)) #convert datetime column to dates and times, then add 9 years to make it 2024; also convert UTC with hours (whoops didn't do this for experiment)
     temp_profile["datetime"] = temp_profile["datetime"].dt.tz_convert(None) #Remove the timezone from datetime
     temp_profile = dict([(i,[x]) for i,x in zip(temp_profile["datetime"], temp_profile["temp"])])
     print(temp_profile)
@@ -75,7 +78,7 @@ def mhw_sim():
     temp_thresh = 2 # set point + this value for hot tank max temp
     
     #initalize PID parameters
-    pid_value_cold = 0.005 # output > value #0.005 for 18C, 0.0145
+    pid_value_cold = 0.005 # output > value
     pid_value_hot = 0 # output < value
     Kp = 1 #proportional gain, determines how fast the system responds
     Ki = 0.05 #integral, determines how fast steady-state error is removed
@@ -128,7 +131,7 @@ def mhw_sim():
             if avg_temps[1] > temp_set[0]+temp_thresh: #if heater tank is too hot
                 io_inst.heat(2,0) #turn the heaters off
                 print(f"Heater off")
-            elif avg_temps[1] > temp_set[0]+0.3:
+            elif avg_temps[1] > temp_set[0]+0.45:
                 io_inst.heat(2,0) #keep the heaters off
                 print(f"Heater staying off")
             else:
