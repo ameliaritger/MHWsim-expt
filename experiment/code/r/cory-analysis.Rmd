@@ -1,5 +1,5 @@
 ---
-title: "Untitled"
+title: "Corynactis MHWsim experiment data analysis"
 author: "Amelia Ritger"
 date: "2023-11-01"
 output: html_document
@@ -14,11 +14,11 @@ library(lubridate)
 library(ggpmisc) #statpolyeq ggplot
 ```
 
-# Population size
+# Load Population data
 ```{r}
 alive <- read_csv(here("experiment", "data", "mortality.csv")) %>% #each file will be read in, specify which columns you need read in to avoid any error
   clean_names() %>%
-  mutate(date = mdy(date)) #%>%
+  mutate(date = if_else(mdy(date) == "2024-01-31", mdy(date)-days(1), mdy(date))) #correct for date discrepancy between measurements
   #arrange(date) %>%
          #treatment = ifelse(tank < 6, "cold", ifelse(tank>10, "extreme", "severe")),
          #tank=as.factor(tank)) %>%
@@ -31,7 +31,7 @@ alive <- read_csv(here("experiment", "data", "mortality.csv")) %>% #each file wi
 #  facet_wrap(~tank)
 ```
 
-# Behavior
+# Load Behavior data
 ```{r}
 open <- read_csv(here("experiment", "data", "behavior.csv")) %>% #each file will be read in, specify which columns you need read in to avoid any error
   clean_names() %>%
@@ -56,7 +56,7 @@ open <- read_csv(here("experiment", "data", "behavior.csv")) %>% #each file will
 #  facet_wrap(~treatment)
 ```
 
-# All data
+# Merge and tidy all data
 ```{r}
 all <- full_join(open, alive, by=join_by(date==date, tank==tank, genet==genet)) %>%
   select(-time.y, -time.x) %>%
@@ -64,23 +64,26 @@ all <- full_join(open, alive, by=join_by(date==date, tank==tank, genet==genet)) 
                             levels = c("cold", "severe", "extreme")),
          tank=as.factor(tank),
          genet=as.factor(genet),
-         value_replace = case_when(is.na(open) ~ n-(0+partial_open+partial_closed+closed),
-                                   is.na(partial_open) ~ n-(open+0+partial_closed+closed),
-                                   is.na(partial_closed) ~ n-(open+partial_open+0+closed),
-                                   is.na(closed) ~ n-(open+partial_open+partial_closed+0),
-                                   TRUE ~ n-(open+partial_open+partial_closed+closed)),
-         across(open:closed, ~ ifelse(date < ymd("2023-09-30"), .x,
-                                      ifelse(is.na(.x), value_replace, .x))),
+         across(open:closed,
+                ~if_else(date > ymd("2023-09-30") & is.na(.),
+                         n-rowSums(across(c(open, partial_open, partial_closed, closed)), na.rm=TRUE), .)),
         percent_open = (open+partial_open)/n,
         percent_closed = (closed+partial_closed)/n,
-        #create a new column mhw where if the date is before 12/12/23, it's "during", and if it's after, it's "after"
+        percent_fully_open = open/n,
         mhw = factor(case_when(date < ymd("2023-12-12") ~ "during", TRUE ~ "after"),
-                     levels = c("during", "after"))) %>%
+                     levels = c("during", "after"))) %>% #create a new column mhw where if the date is before 12/12/23, it's "during", and if it's after, it's "after"
   group_by(tank, genet) %>%
   arrange(date) %>%
-  mutate(removed_cum = cumsum(removed), # generate cumulative number of polyps removed, to represent total number of polyps excluding removal
-         n_true = alive+dying_dead+removed_cum+floating, #overwrite n value to incorporate cumulative number of removed polyps
-         diff_n = n_true-lag(n_true, default = first(n_true)),
+  mutate(removed_cum = if_else(is.na(cumsum(removed)), 0, cumsum(removed)),# generate cumulative number of polyps removed, to represent total number of polyps excluding removal
+         n_true = alive+dying_dead+removed_cum+floating,
+         diff_n_cont = n_true-lag(n_true, default = first(n_true)),
+         growth_rate_cont = cumsum(diff_n_cont)) %>% #overwrite n value to incorporate cumulative number of removed polyps
+         #diff_n = n_true - lag(n_true, default = ifelse(date <= ymd("2023-12-12"), first(n_true), n_true[date == ymd("2023-12-12")])[1]),
+  ungroup() %>%
+  #"reset the clock to zero" once the MHW is over
+  group_by(tank, genet, mhw) %>%
+  arrange(date) %>%
+  mutate(diff_n = n_true-lag(n_true, default = first(n_true)),
          growth_rate = cumsum(diff_n)) %>%
   ungroup() %>%
   filter(!is.na(date))
@@ -95,41 +98,192 @@ model <- all %>%
 #extract equation for each genet
 eq <- model %>%
   do(eq = paste0("y = ", format(coef(.$model)[1], digits = 2),
-                " + ", format(coef(.$model)[2], digits = 2), "x"))
+                " + ", format(coef(.$model)[2], digits = 2), "x")) %>%
+  bind_cols(genet = model$genet) #add back in genet column from model df
+```
 
-eq <- eq %>%
-#add back genet column
-  mutate(genet = model$genet)
+#Start plotting the data
 
-ggplot(df, aes(x, y)) +
-  geom_point() +
-  stat_smooth(method = "lm", formula = y ~ poly(x, 2), se = FALSE) +
-  geom_label(x = 5, y = 35, label = eq)
+## Plot basic growth rate across entire experiment
+```{r}
+ggplot(all, aes(x=date, y=growth_rate_cont, color=genet)) +
+  facet_wrap(~treatment,
+             labeller =  labeller(treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
+  geom_point(alpha=0.5) +
+  geom_smooth(method = "lm", formula = y ~ x, se = F) +
+  stat_poly_eq(use_label("eq"), formula = y ~ x, na.rm=TRUE) +
+  scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  theme_minimal() +
+  #coord_cartesian(ylim = c(-5, 25), expand=TRUE) +   #set equal y axes coordinates
+  labs(x = "Date",
+       y = "Cumulative population growth (no. polyps)",
+       color = "Genet")
 
+#ggsave(here("experiment", "figures", "growth_genet.png"), width=12, height=7)
+```
+
+## Plot growth rate of all genets during and after MHW
+```{r}
+ggplot(all, aes(x=date, y=growth_rate, color = treatment)) +
+  geom_point(alpha=0.1) +
+  facet_wrap(~mhw, scales="free", labeller = labeller(mhw = c("during" = "During MHW", "after" = "After MHW"))) +
+  geom_smooth(method = "lm", formula = y ~ x, se = F) +
+  stat_poly_eq(use_label("eq"), formula = y ~ x, parse = TRUE, label.x.npc = "left") +
+  #add custom color palette
+  scale_color_manual(values = c("cold" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00"),
+                     labels = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW")) +
+  theme_minimal() +
+  coord_cartesian(ylim = c(-5, 25), expand=TRUE) +   #set equal y axes coordinates
+  labs(x = "Date",
+       y = "Cumulative population growth (no. polyps)",
+       color = "Treatment")
+
+#ggsave(here("experiment", "figures", "growth_MHW.png"), width=12, height=7)
+```
+
+## Plot growth rate of each genet during and after MHW
+```{r}
+ggplot(all, aes(x=date, y=growth_rate, color = genet)) +
+  geom_point(alpha=0.1) +
+  facet_grid(mhw~treatment, 
+             #switch = 'x',
+             scales = "free_x",
+             labeller = labeller(mhw = c("during" = "During MHW", "after" = "After MHW"),
+                                 treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
+  geom_smooth(method = "lm", formula = y ~ x, se = F) +
+  stat_poly_eq(use_label("eq"), formula = y ~ x, parse = TRUE, label.x.npc = "left") +
+  #add custom color palette
+  scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  theme_minimal() +
+  #coord_cartesian(ylim = c(-5, 25), expand=TRUE) +   #set equal y axes coordinates
+  labs(x = "Date",
+       y = "Cumulative population growth (no. polyps)",
+       color = "Genet")
+  theme(strip.placement = "outside")
+
+#ggsave(here("experiment", "figures", "growth_MHW_genet.png"), width=12, height=10)
+```
+
+## Plot growth rate of each genet during and after MHW - but not faceted by MHW
+```{r}
+label_plot <- c("0.136", "0.0972", "0.0734", "0.0614", "0.085",
+                "0.154", "0.101", "0.0299", "0.124", "0.0577",
+                "0.175", "0.151", "0.0603", "0.141", "0.0978",
+                "0.00128", "0.0119", "0.026", "0.00843", "-0.0104",
+                "0.0102", "0.00652", "0.00881", "0.00421", "-0.0117",
+                "-0.0104", "-0.000895", "0.0217", "0.0139", "-0.0198")
+color_plot <- rep(c("#9370DB", "#C21B78", "#FF9933", "#FF3333", "#662B45"), times = 6)
+treatment_plot <- rep(c(rep("cold", 5), rep("extreme", 5), rep("severe", 5)), times = 2)
+date_plot <- c(rep("2023-10-01", 15), rep("2024-01-10", 15))
+
+p <- ggplot(all, aes(x=date, y=growth_rate_cont, color=genet, shape=mhw)) +
+  geom_point(alpha=0.15) +
+  facet_wrap(~factor(treatment, levels=c("cold", "severe", "extreme"), labels=c("Ambient", "Severe MHW", "Extreme MHW"))) + 
+  geom_smooth(method = "lm", se = FALSE) +
+  #stat_poly_eq(use_label("eq"), formula = y ~ x, parse = TRUE) +  
+  geom_rect(aes(xmin = as.Date("2023-11-30"), xmax = as.Date("2023-12-10"), ymin = -5, ymax = -4.5), color = "dimgray", fill = "dimgray", alpha = 0.2) +  # Add horizontal bar
+    geom_rect(aes(xmin = as.Date("2024-02-14"), xmax = as.Date("2024-02-21"), ymin = -5, ymax = -4.5), color = "dimgray", fill = "dimgray", alpha = 0.2) +  # Add horizontal bar
+  geom_vline(xintercept = as.Date("2023-12-10"), linetype = "dashed") +  # Add vertical line delineating during/after MHW
+  scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  scale_shape_manual(values = c("during" = 16, "after" = 17)) +  # Define shapes for mhw levels
+  theme_minimal() +
+  coord_cartesian(ylim = c(-5, 25), expand=TRUE) +
+  labs(x = "Date",
+       y = "Cumulative population growth (no. polyps)",
+       color = "Genet") +
+  guides(shape = "none")
+
+loop_count = 0
+for (i in 1:length(label_plot)) {
+  p <- p + geom_text(data = data.frame(date = as.Date("2023-12-30"), treatment = treatment_plot[i], mhw = "during"), 
+              label=paste0("m = ", label_plot[i]), x = as.Date(date_plot[i]), y = 25-loop_count, hjust = 0, vjust = 1, color=color_plot[i])
+  loop_count <- loop_count + 1
+  if (loop_count > 4) {
+    loop_count <- 0  # Reset counter after every 5th iteration
+  }
+}
+p
+
+#ggsave(here("experiment", "figures", "growth_MHW_genet_combined.png"), width=12, height=7)
+```
+
+## Plot raw population numbers
+```{r}
+g <- ggplot(all, aes(x=date, y=n_true, color=genet, shape=mhw)) +
+  geom_point(alpha=0.15) +
+  facet_wrap(~factor(treatment, levels=c("cold", "severe", "extreme"), labels=c("Ambient", "Severe MHW", "Extreme MHW"))) + 
+  geom_smooth(method = "lm", se = FALSE) +
+ # stat_poly_eq(use_label("eq"), formula = y ~ x, parse = TRUE) +  
+  geom_rect(aes(xmin = as.Date("2023-11-30"), xmax = as.Date("2023-12-10"), ymin = 5, ymax = 5.5), color = "dimgray", fill = "dimgray", alpha = 0.2) +  # Add horizontal bar
+    geom_rect(aes(xmin = as.Date("2024-02-14"), xmax = as.Date("2024-02-21"), ymin = 5, ymax = 5.5), color = "dimgray", fill = "dimgray", alpha = 0.2) +  # Add horizontal bar
+  geom_vline(xintercept = as.Date("2023-12-10"), linetype = "dashed") +  # Add vertical line delineating during/after MHW
+  scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  scale_shape_manual(values = c("during" = 16, "after" = 17)) +  # Define shapes for mhw levels
+  theme_minimal() +
+  coord_cartesian(ylim = c(5, 40), expand=TRUE) +
+  labs(x = "Date",
+       y = "Number of polyps",
+       color = "Genet") +
+  guides(shape = "none")
+
+loop_count = 0
+for (i in 1:length(label_plot)) {
+  g <- g + geom_text(data = data.frame(date = as.Date("2023-12-30"), treatment = treatment_plot[i], mhw = "during"), 
+              label=paste0("m = ", label_plot[i]), x = as.Date(date_plot[i]), y = 40-loop_count, hjust = 0, vjust = 1, color=color_plot[i])
+  loop_count <- loop_count + 1
+  if (loop_count > 4) {
+    loop_count <- 0  # Reset counter after every 5th iteration
+  }
+}
+g
+
+#ggsave(here("experiment", "figures", "n_MHW_genet_combined.png"), width=12, height=7)
+```
+
+## Plot behavior data
+```{r}
+# %closed facet grid
 ggplot(all, aes(x=genet, y=percent_closed, fill=genet, group=genet)) +
   geom_point(aes(color=genet)) +
   geom_violin(position="dodge", alpha=0.5, outlier.colour="transparent") +
   #facet_wrap(~treatment)
-  facet_wrap(~mhw+treatment)
+  facet_grid(mhw~treatment)
 
-ggplot(all, aes(x=date, y=growth_rate, color=genet)) +
-  geom_point(alpha=0.5) +
-  #facet_wrap(~mhw+treatment) +
-  geom_smooth(method = "lm", formula = y ~ x, se = F) +
-  stat_poly_eq(use_label("eq"), formula = y ~ x, na.rm=TRUE)
-  #facet_wrap(~treatment)
+# %closed facet wrap
+ggplot(all, aes(x = genet, y = percent_closed, fill = genet, group = interaction(genet, mhw), shape = mhw)) +
+  geom_point(aes(color = genet), position = position_dodge(width = 0.9)) +
+  geom_violin(aes(size = mhw), position = position_dodge(width = 0.9), alpha = 0.5, outlier.colour = "transparent") +
+  facet_wrap(~treatment) +
+  scale_size_manual(values = c("during" = 1, "after" = 0.5)) + # Define sizes for mhw levels
+  scale_shape_manual(values = c("during" = 16, "after" = 17))  # Define shapes for mhw levels
 
-ggplot(all[all$mhw == "after" & all$treatment == "extreme", ], aes(x = date, y = growth_rate, group = genet)) +
-  geom_point(alpha = 0.5) +
-  geom_smooth(method = "lm", formula = y ~ x, se = F) +
-    #stat_smooth_func(geom="text",method="lm",hjust=0,parse=TRUE)+
-    stat_poly_eq(aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
-               label.x.npc = "right", label.y.npc = 0.15,
-               formula = y ~ x, parse = TRUE, size = 3)
-  #stat_smooth(method = "lm", formula = y ~ x, se = F) +
-  #stat_poly_eq(use_label("eq"), na.rm = TRUE, coef.keep.zeros = TRUE) +
-  scale_y_continuous(limits = c(0, 100))
+# %fullyOpen facet wrap
+ggplot(all, aes(x = genet, y = percent_fully_open, fill = genet, group = interaction(genet, mhw), shape = mhw)) +
+  geom_point(aes(color = genet), position = position_dodge(width = 0.9), alpha = 0.5) +
+  geom_violin(aes(size = mhw), position = position_dodge(width = 0.9), alpha = 0.3, color = alpha("black", 0.75)) +
+  facet_wrap(~treatment,
+             labeller =  labeller(treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
+  scale_size_manual(values = c("during" = 1, "after" = 0.5), labels = c("During MHW", "After MHW")) + # Define sizes for mhw levels
+  scale_shape_manual(values = c("during" = 16, "after" = 17), labels = c("During MHW", "After MHW")) + # Define shapes for mhw levels
+  # change color of violin 
+  scale_fill_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  theme_minimal() +
+  labs(x = "Genet",
+       y = "% open polyps",
+       color = "Genet",
+       shape = "MHW",
+       size = "MHW") +
+  guides(fill = "none",
+         color = "none")
 
+#ggsave(here("experiment", "figures", "open_MHW_genet.png"), width=12, height=7)
+```
+
+# Start running stats
+
+## Basic ANOVA
+```{r}
 sample_anova <-aov(data=all,diff_n~genet+treatment)
 summary(sample_anova)
 TukeyHSD(sample_anova, which="genet")
