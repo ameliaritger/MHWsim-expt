@@ -60,6 +60,7 @@ open <- read_csv(here("experiment", "data", "behavior.csv")) %>% #each file will
 ```{r}
 all <- full_join(open, alive, by=join_by(date==date, tank==tank, genet==genet)) %>%
   select(-time.y, -time.x) %>%
+  filter(date >= ymd("2023-10-01")) %>%
   mutate(treatment = factor(case_when(tank < 6 ~ "cold", tank > 10 ~ "extreme", TRUE ~ "severe"),
                             levels = c("cold", "severe", "extreme")),
          tank=as.factor(tank),
@@ -100,9 +101,21 @@ eq <- model %>%
   do(eq = paste0("y = ", format(coef(.$model)[1], digits = 2),
                 " + ", format(coef(.$model)[2], digits = 2), "x")) %>%
   bind_cols(genet = model$genet) #add back in genet column from model df
+
+all_filter <- all %>%
+  select(date, tank, genet, alive, splitting, diff_n_cont)
 ```
 
 #Start plotting the data
+
+## Data QA/QC plots
+```{r}
+ggplot(all, aes(x=date, y=diff_n_cont, color=genet)) +
+  geom_point() +
+  facet_wrap(~treatment) +
+  scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  theme_minimal()
+```
 
 ## Plot basic growth rate across entire experiment
 ```{r}
@@ -166,12 +179,12 @@ ggplot(all, aes(x=date, y=growth_rate, color = genet)) +
 
 ## Plot growth rate of each genet during and after MHW - but not faceted by MHW
 ```{r}
-label_plot <- c("0.136", "0.0972", "0.0734", "0.0614", "0.085",
-                "0.154", "0.101", "0.0299", "0.124", "0.0577",
-                "0.175", "0.151", "0.0603", "0.141", "0.0978",
-                "0.00128", "0.0119", "0.026", "0.00843", "-0.0104",
-                "0.0102", "0.00652", "0.00881", "0.00421", "-0.0117",
-                "-0.0104", "-0.000895", "0.0217", "0.0139", "-0.0198")
+label_plot <- c("0.13", "0.09", "0.071", "0.0522", "0.0761",
+                "0.151", "0.0933", "0.0252", "0.116", "0.0413", #extreme during
+                "0.166", "0.142", "0.0522", "0.134", "0.0902",
+                "-0.0023", "0.00741", "0.026", "0.00843", "-0.0131",
+                "0.0102", "0.00652", "0.00881", "0.00421", "-0.0117", #extreme after
+                "-0.0104", "-0.000895", "0.0217", "0.0127", "-0.0131")
 color_plot <- rep(c("#9370DB", "#C21B78", "#FF9933", "#FF3333", "#662B45"), times = 6)
 treatment_plot <- rep(c(rep("cold", 5), rep("extreme", 5), rep("severe", 5)), times = 2)
 date_plot <- c(rep("2023-10-01", 15), rep("2024-01-10", 15))
