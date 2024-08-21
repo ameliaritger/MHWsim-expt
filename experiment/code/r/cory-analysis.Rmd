@@ -280,6 +280,25 @@ ggplot(all, aes(x = genet, y = percent_fully_open, fill = genet, group = interac
 #ggsave(here("experiment", "figures", "open_MHW_genet.png"), width=12, height=7)
 ```
 
+
+## Plot mortality (lol)
+```{r}
+ggplot(all, aes(x=date, y=dying_dead, color = treatment)) +
+  geom_point(alpha=0.1) +
+  facet_wrap(~treatment, 
+             labeller = labeller(treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
+  geom_smooth(method = "lm", formula = y ~ x, se = F) +
+  scale_color_manual(values = c("cold" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00")) +
+  theme_minimal() +
+  scale_y_continuous(breaks = seq(0, 10, 2), limits = c(0, 10), labels = function(x) format(x, nsmall = 0)) +
+  labs(x = "Date",
+       y = "Mortality (no. polyps)",
+       color = "Treatment") +
+  guides(color = "none")
+
+#ggsave(here("experiment", "figures", "mortality_MHW.png"), width=12, height=7)
+```
+
 # Start running stats
 
 ## Basic ANOVA
