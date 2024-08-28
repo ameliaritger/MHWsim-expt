@@ -141,14 +141,11 @@ merged_check <- left_join(master, data_to_check, by = c("date", "tank", "genet")
          !(date == ymd("2024-01-12") & tank == 6 & genet == "E"),
          !(date == ymd("2023-10-27") & tank == 8 & genet == "E"))
 
-
-
 data_check <- data_clean %>%
   filter(date == ymd("2023-12-08"),
          tank == 1,
          genet == "D")
 ```
-
 
 # Now the data has been checked and corrected, time for the proper plotting
 
@@ -161,9 +158,10 @@ body_size <- data_clean %>%
             sd_size = sd(c(basal_disk_diameter_mm_a, basal_disk_diameter_mm_b)),
             avg_biomass_g = mean(ww_g),
             sd_biomass_g = sd(ww_g),
-            total_biomass_g = sum(ww_g)/(n_distinct(sampler)),
-            n_polyps = n()/n_distinct(sampler),
-            samplers=n_distinct(sampler))
+            n_polyps_sampler = n()/n_distinct(sampler),
+            samplers=n_distinct(sampler)) %>%
+  left_join(master, by = c("date", "tank", "genet")) %>%
+  mutate(total_biomass_g = avg_biomass_g*n)
 
 check_size <- data_clean %>%
   filter(tank == 14,
@@ -173,7 +171,7 @@ check_size <- data_clean %>%
 
 ## Plot average body size between treatments
 ```{r}
-ggplot(body_size, aes(x=date, y=n_polyps, color=treatment)) +
+ggplot(body_size, aes(x=date, y=n_polyps_sampler, color=treatment)) +
   geom_point(aes(), size=1, alpha=0.3) +
   geom_smooth(aes(fill=treatment, size=mhw), method="lm", se=T) +
   #stat_poly_eq(use_label("eq"), formula = y ~ x, parse = TRUE, hjust = -1, vjust = 10) +  
@@ -232,6 +230,24 @@ ggplot(body_size_group, aes(x=date, y=avg_size, group=treatment)) +
 ```
 
 ## Plot average body size between genets for each treatment
+### NEED TO SPLIT THIS UP BECAUSE OF RESPO REMOVALS
+```{r}
+ggplot(body_size, aes(x=date, y=avg_biomass_g, group=genet)) +
+  #geom_ribbon(data=body_size_group, aes(ymin=avg_total_biomass-sd_total_biomass, ymax=avg_total_biomass+sd_total_biomass, fill=genet), alpha=0.2) +
+  geom_point(aes(color=genet), size=1, alpha=0.5) +
+  geom_smooth(method="loess", aes(color=genet, fill=genet), se=T) +
+  scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  scale_fill_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  facet_wrap(~treatment, labeller = labeller(treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
+  labs(y="Average size (g)",
+       x="Date",
+       color="Genet",
+       fill="Genet")
+
+#ggsave(here("experiment", "figures", "avg_g_polyps_MHW.png"), width=12, height=7)
+```
+
+## Plot total biomass between genets for each treatment
 ```{r}
 ggplot(body_size, aes(x=date, y=total_biomass_g, group=genet)) +
   #geom_ribbon(data=body_size_group, aes(ymin=avg_total_biomass-sd_total_biomass, ymax=avg_total_biomass+sd_total_biomass, fill=genet), alpha=0.2) +
