@@ -122,19 +122,26 @@ master <- read_csv(here("experiment", "data", "mortality.csv")) %>% #each file w
   select(date, tank, genet, alive, n, removed)
 
 data_to_check <- data_clean %>%
-  group_by(genet, tank, date) %>%
-  summarize(n_polyps_samplers = n()/n_distinct(sampler),
-            n_samplers = n_distinct(sampler)) %>%
-  filter(tank == 4)
-
+  group_by(genet, tank, date, sampler) %>%
+  summarize(#n_polyps_samplers = n()/n_distinct(sampler),
+            polyps_counted = n())
+  
 merged_check <- left_join(master, data_to_check, by = c("date", "tank", "genet")) %>%
-  filter(!is.na(n_polyps_samplers)) %>%
-  mutate(diff = abs(n-n_polyps_samplers),
-         diff2 = abs(alive-n_polyps_samplers),
+  filter(!is.na(sampler)) %>%
+  mutate(diff = abs(n-polyps_counted),
+         diff2 = abs(alive-polyps_counted),
          #identify minimum value between diff and diff2
          min_diff = pmin(diff, diff2)) %>%
-  arrange(tank, date, genet) %>%
-  filter(tank == 4)
+  arrange(sampler, tank, date, genet) %>%
+  filter(min_diff > 3,
+         #sampler %in% c("Lili"),
+         !(date == ymd("2023-10-13") & tank == 1 & genet == "D"),
+         !(date == ymd("2023-10-13") & tank == 1 & genet == "E"),
+         !(date == ymd("2023-12-01") & tank == 2 & genet == "D"),
+         !(date == ymd("2024-01-12") & tank == 6 & genet == "E"),
+         !(date == ymd("2023-10-27") & tank == 8 & genet == "E"))
+
+
 
 data_check <- data_clean %>%
   filter(date == ymd("2023-12-08"),
@@ -148,14 +155,20 @@ data_check <- data_clean %>%
 ## Create dataset - body size per tank for each genet
 ```{r}
 body_size <- data_clean %>%
+  filter(avg_diameter_mm > 1) %>%
   group_by(genet, tank, date, treatment, mhw) %>%
   summarize(avg_size = mean(c(basal_disk_diameter_mm_a, basal_disk_diameter_mm_b)),
             sd_size = sd(c(basal_disk_diameter_mm_a, basal_disk_diameter_mm_b)),
             avg_biomass_g = mean(ww_g),
             sd_biomass_g = sd(ww_g),
-            total_biomass_g = sum(ww_g)/(n()/n_distinct(sampler)),
-            n_polyps = n()/n_distinct(sampler))
-            #samplers=n_distinct(sampler))
+            total_biomass_g = sum(ww_g)/(n_distinct(sampler)),
+            n_polyps = n()/n_distinct(sampler),
+            samplers=n_distinct(sampler))
+
+check_size <- data_clean %>%
+  filter(tank == 14,
+         genet == "A", 
+         date == ymd("2024-01-12"))
 ```
 
 ## Plot average body size between treatments
@@ -185,7 +198,19 @@ body_size_group <- data_clean %>%
   group_by(genet, treatment, date) %>%
   summarize(avg_size = mean(c(basal_disk_diameter_mm_a, basal_disk_diameter_mm_b), na.rm=T),
             sd_size = sd(c(basal_disk_diameter_mm_a, basal_disk_diameter_mm_b), na.rm=T),
-            n=n())
+            avg_biomass = mean(ww_g, na.rm=T),
+            sd_biomass = sd(ww_g, na.rm=T),
+            n=n()) %>%
+  ungroup()
+
+body_size_biomass <- body_size %>%
+  group_by(genet, treatment, date) %>%
+  summarize(avg_total_biomass = mean(total_biomass_g, na.rm=T),
+            sd_total_biomass = sd(total_biomass_g, na.rm=T)) %>%
+  ungroup()
+
+#merge body_size_group and body_size_biomass
+body_size_group <- left_join(body_size_group, body_size_biomass, by=c("genet", "treatment", "date")) 
 ```
 
 ## Plot average body size between treatments for each genet
@@ -202,19 +227,24 @@ ggplot(body_size_group, aes(x=date, y=avg_size, group=treatment)) +
   facet_wrap(~genet) +
   labs(y="Average size (mm)",
        x="Date")
+
+#ggsave(here("experiment", "figures", "size_polyps_MHW_genet.png"), width=12, height=7)
 ```
 
 ## Plot average body size between genets for each treatment
 ```{r}
-ggplot(body_size, aes(x=date, y=avg_size, group=genet)) +
-  geom_ribbon(aes(ymin=avg_size-sd_size, ymax=avg_size+sd_size, fill=genet), alpha=0.2) +
-  geom_point(aes(color=genet), size=1) +
+ggplot(body_size, aes(x=date, y=total_biomass_g, group=genet)) +
+  #geom_ribbon(data=body_size_group, aes(ymin=avg_total_biomass-sd_total_biomass, ymax=avg_total_biomass+sd_total_biomass, fill=genet), alpha=0.2) +
+  geom_point(aes(color=genet), size=1, alpha=0.5) +
+  geom_smooth(method="loess", aes(color=genet, fill=genet), se=T) +
   scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
   scale_fill_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
   facet_wrap(~treatment, labeller = labeller(treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
-  labs(y="Average size (mm)",
+  labs(y="Average biomass (g)",
        x="Date",
        color="Genet",
        fill="Genet")
+
+#ggsave(here("experiment", "figures", "avg_mass_polyps_MHW.png"), width=12, height=7)
 ```
 
