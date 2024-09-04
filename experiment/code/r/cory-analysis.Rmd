@@ -14,6 +14,11 @@ library(lubridate)
 library(ggpmisc) #statpolyeq ggplot
 ```
 
+# Load Body Size data
+```{r}
+source("readBodySizeData.R", local = knitr::knit_global())
+```
+
 # Load Population data
 ```{r}
 alive <- read_csv(here("experiment", "data", "mortality.csv")) %>% #each file will be read in, specify which columns you need read in to avoid any error
@@ -59,7 +64,8 @@ open <- read_csv(here("experiment", "data", "behavior.csv")) %>% #each file will
 # Merge and tidy all data
 ```{r}
 all <- full_join(open, alive, by=join_by(date==date, tank==tank, genet==genet)) %>%
-  select(-time.y, -time.x) %>%
+  full_join(body_size, by=join_by(date==date, tank==tank, genet==genet)) %>%
+  select(-time.y, -time.x, -n_polyps_sampler, -samplers) %>%
   filter(date >= ymd("2023-10-01")) %>%
   mutate(treatment = factor(case_when(tank < 6 ~ "cold", tank > 10 ~ "extreme", TRUE ~ "severe"),
                             levels = c("cold", "severe", "extreme")),
@@ -78,7 +84,8 @@ all <- full_join(open, alive, by=join_by(date==date, tank==tank, genet==genet)) 
   mutate(removed_cum = if_else(is.na(cumsum(removed)), 0, cumsum(removed)),# generate cumulative number of polyps removed, to represent total number of polyps excluding removal
          n_true = alive+dying_dead+removed_cum+floating,
          diff_n_cont = n_true-lag(n_true, default = first(n_true)),
-         growth_rate_cont = cumsum(diff_n_cont)) %>% #overwrite n value to incorporate cumulative number of removed polyps
+         growth_rate_cont = cumsum(diff_n_cont),
+         total_biomass = avg_biomass_g*n_true) %>% #overwrite n value to incorporate cumulative number of removed polyps
          #diff_n = n_true - lag(n_true, default = ifelse(date <= ymd("2023-12-12"), first(n_true), n_true[date == ymd("2023-12-12")])[1]),
   ungroup() %>%
   #"reset the clock to zero" once the MHW is over
@@ -88,7 +95,19 @@ all <- full_join(open, alive, by=join_by(date==date, tank==tank, genet==genet)) 
          growth_rate = cumsum(diff_n)) %>%
   ungroup() %>%
   filter(!is.na(date))
+```
 
+
+```{r}
+#plot total_biomass over time
+ggplot(all, aes(x=date, y=total_biomass_true)) +
+  geom_point(aes(color=genet), size=0.5) +
+  geom_smooth(aes(fill=genet, color=genet), method="lm", se=T) +
+  facet_wrap(~treatment)
+```
+
+
+```{r}
 # run linear regression of growth rate x date for each genet
 model <- all %>%
   filter(mhw == "after",
@@ -291,6 +310,44 @@ ggplot(all, aes(x = genet, y = percent_fully_open, fill = genet, group = interac
          color = "none")
 
 #ggsave(here("experiment", "figures", "open_MHW_genet.png"), width=12, height=7)
+```
+
+# Plot body size data
+
+## Plot total biomass over time
+```{r}
+ggplot(all, aes(x=date, y=total_biomass_true)) +
+  geom_point(aes(color=genet), size=0.5) +
+  geom_smooth(aes(fill=genet, color=genet), method="lm", se=T) +
+  facet_wrap(~treatment,
+             labeller =  labeller(treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
+  scale_fill_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  theme_minimal() +
+  labs(x = "Date",
+       y = "Total biomass (g)",
+       color = "Genet",
+       fill = "Genet")
+
+#ggsave(here("experiment", "figures", "total_biomass_mhw.png"), width=12, height=7)
+```
+
+## Plot average body size over time
+```{r}
+ggplot(all, aes(x=date, y=avg_size)) +
+  geom_point(aes(color=genet), size=0.5) +
+  geom_smooth(aes(fill=genet, color=genet), method="loess", se=T) +
+  facet_wrap(~treatment,
+             labeller =  labeller(treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
+  scale_fill_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  theme_minimal() +
+  labs(x = "Date",
+       y = "Average body size (mm)",
+       color = "Genet",
+       fill = "Genet")
+
+#ggsave(here("experiment", "figures", "avg_size_mhw.png"), width=12, height=7)
 ```
 
 
