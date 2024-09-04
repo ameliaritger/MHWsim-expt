@@ -64,7 +64,13 @@ data_clean <- all_data %>%
          mhw = factor(case_when(date < ymd("2023-12-12") ~ "during", TRUE ~ "after"),
                      levels = c("during", "after")),
          ww_g = 0.0975+3.02*avg_diameter_mm+1.08*avg_diameter_mm^2) %>% #calculate wet weight in grams, equation from 2019/2020 Corynactis body size measurements
-  select(sampler, date, tank, genet, treatment, mhw, basal_disk_diameter_mm_a, basal_disk_diameter_mm_b, avg_diameter_mm, ww_g, flag)
+  select(sampler, date, tank, genet, treatment, mhw, basal_disk_diameter_mm_a, basal_disk_diameter_mm_b, avg_diameter_mm, ww_g, flag) #%>%
+  #filter(!(sampler=="Lili" & tank==2))
+
+#visualize with histogram
+ggplot(data_clean, aes(x = as.numeric(tank), color = sampler)) +
+  geom_histogram() +
+  scale_x_continuous(breaks = unique(as.numeric(data_clean$tank)))
 ```
 
 # start some vis for QA/QC
@@ -74,14 +80,10 @@ data_clean <- all_data %>%
 data_check <- all_data %>%
   group_by(tank_number, date_photo, sampler) %>%
   filter(tank_number %in% c(2,4,6,9,11,14)) %>% #change tank number accordingly 2,4,6,9,11,14
-  summarize(n = n()) #%>% #comment out everything after this to check overall # unique samplers
-  #group_by(tank_number, date_photo) %>%
+  summarize(n = n()) %>%
+  filter(!(sampler=="Lili" & tank_number==2))#%>% #comment out everything after this to check overall # unique samplers
+   #group_by(tank_number, date_photo) %>%
   #summarize(n=n())
-
-#visualize with histogram
-ggplot(all_data, aes(x = tank_number, color = sampler)) +
-  geom_histogram() +
-  scale_x_continuous(breaks = unique(all_data$tank_number))
 ```
 
 ## visualize average body size per tank between samplers
@@ -172,7 +174,7 @@ check_size <- data_clean %>%
 ## Plot average body size between treatments
 ```{r}
 ggplot(body_size, aes(x=date, y=n_polyps_sampler, color=treatment)) +
-  geom_point(aes(), size=1, alpha=0.3) +
+  geom_point(size=1, alpha=0.3) +
   geom_smooth(aes(fill=treatment, size=mhw), method="lm", se=T) +
   #stat_poly_eq(use_label("eq"), formula = y ~ x, parse = TRUE, hjust = -1, vjust = 10) +  
   scale_size_manual(values = c("during" = 1, "after" = 1)) + # Define sizes for mhw levels
@@ -230,24 +232,24 @@ ggplot(body_size_group, aes(x=date, y=avg_size, group=treatment)) +
 ```
 
 ## Plot average body size between genets for each treatment
-### NEED TO SPLIT THIS UP BECAUSE OF RESPO REMOVALS
 ```{r}
-ggplot(body_size, aes(x=date, y=avg_biomass_g, group=genet)) +
+ggplot(body_size, aes(x=date, y=avg_size, group=genet)) +
   #geom_ribbon(data=body_size_group, aes(ymin=avg_total_biomass-sd_total_biomass, ymax=avg_total_biomass+sd_total_biomass, fill=genet), alpha=0.2) +
   geom_point(aes(color=genet), size=1, alpha=0.5) +
   geom_smooth(method="loess", aes(color=genet, fill=genet), se=T) +
   scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
   scale_fill_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
   facet_wrap(~treatment, labeller = labeller(treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
-  labs(y="Average size (g)",
+  labs(y="Average size (mm)",
        x="Date",
        color="Genet",
        fill="Genet")
 
-#ggsave(here("experiment", "figures", "avg_g_polyps_MHW.png"), width=12, height=7)
+g#gsave(here("experiment", "figures", "avg_mm_polyps_MHW.png"), width=12, height=7)
 ```
 
 ## Plot total biomass between genets for each treatment
+### NEED TO SPLIT THIS UP BECAUSE OF RESPO REMOVALS
 ```{r}
 ggplot(body_size, aes(x=date, y=total_biomass_g, group=genet)) +
   #geom_ribbon(data=body_size_group, aes(ymin=avg_total_biomass-sd_total_biomass, ymax=avg_total_biomass+sd_total_biomass, fill=genet), alpha=0.2) +
