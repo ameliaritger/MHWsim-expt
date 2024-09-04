@@ -12,6 +12,7 @@ library(tidyverse)
 library(here)
 library(lubridate)
 library(janitor)
+library(ggpubr)
 ```
 
 # Load data and merge all temp files
@@ -64,22 +65,72 @@ temp_2 <- temp_2 %>%
 
 # Plot tank temps
 ```{r}
+chill = c("x28_00000eb5045f","x28_00000eb3fd89","x28_00000eb42add","x28_00000eb51050","x28_00000eb4cb62")
+severe = c("x28_00000eb50e10","x28_00000eb501b0", "x28_00000eb496d2", "x28_00000eb3cf7d", "x28_00000eb52c32")
+extreme = c("x28_00000ec23ab6","x28_00000ec25534","x28_00000eb4b7e0", "x28_00000ec24f93", "x28_00000eb4619b")
+
 temp_clean <- temp_all %>%
   select(1:7, 8:25) %>%
   mutate(timestamp = ymd_hms(timestamp),
          severe_set = ifelse(timestamp < ymd_hms("2023-10-04 12:15:00"), chill_set, severe_set),
          extreme_set = ifelse(timestamp < ymd_hms("2023-10-04 12:15:00"), chill_set, extreme_set)) %>%
-  select(-(last_col(offset=3):last_col()), #%>% #remove sump tank temps
+  select(-(last_col(offset=2):last_col()), #%>% #remove sump tank temps
          -(c(5:7))) %>% #%>% #remove heater status
-  pivot_longer(cols=5:18, names_to = "sensor", values_to = "temperature") %>%
-  filter(timestamp > ymd_hms("2023-09-21 12:00:00")) #only keep data since addition of Corynactis
+  pivot_longer(cols=5:19, names_to = "sensor", values_to = "temperature") %>%
+  filter(timestamp > ymd_hms("2023-09-21 12:00:00")) %>% #only keep data since addition of Corynactis
   #filter(timestamp > ymd_hms("2024-01-20 01:00:00"))
+  mutate(treatment = case_when(
+    sensor %in% chill ~ "chill",
+    sensor %in% severe ~ "severe",
+    sensor %in% extreme ~ "extreme",
+    TRUE ~ "unknown"
+  ),
+    treatment = factor(treatment, levels = c("chill", "severe", "extreme")))
 
-ggplot(temp_clean, aes(x=timestamp)) +
-  geom_line(aes(y=temperature, color=sensor), size=1) +
-  geom_line(aes(y=chill_set), color="blue") +
-  geom_line(aes(y=severe_set), color="orange") +
-  geom_line(aes(y=extreme_set), color="red")
+plot_set <- ggplot(temp_clean, aes(x=timestamp)) +
+  geom_line(aes(y=chill_set, color="chill_set")) +
+  geom_line(aes(y=severe_set, color="severe_set")) +
+  geom_line(aes(y=extreme_set, color="extreme_set")) +
+  scale_color_manual(name = "",
+                     breaks = c("chill_set", "severe_set", "extreme_set"),
+                     values = c("chill_set" = "#003D52", "severe_set" = "#C28200", "extreme_set" = "#A53E00"),
+                     labels = c("chill_set" = "Ambient Set Point", "severe_set" = "Severe Set Point", "extreme_set" = "Extreme Set Point")) +
+  scale_y_continuous(breaks = seq(12, 26, 2), limits = c(12, 27)) +
+  theme_minimal() +
+  labs(x = "Date",
+       y = "Temperature") +
+  theme(legend.position = "top")
+```
 
-#ggsave(here("figures", "chill-old-new.png"))
+# Plot tank temps averaged across treatments
+```{r}
+temp_sorted <- temp_clean %>%
+  group_by(timestamp, chill_set, severe_set, extreme_set, treatment) %>%
+  summarize(avg_temp = mean(temperature, na.rm=TRUE)) %>%
+  ungroup() %>%
+  filter(timestamp > ymd_hms("2023-09-22 12:00:00")) #only keep data since addition of Corynactis
+
+plot_avg <- ggplot(temp_sorted, aes(x=timestamp)) +
+  #geom_line(aes(y=chill_set, color="chill_set"), linetype="dashed") +
+  #geom_line(aes(y=severe_set, color="severe_set"), linetype="dashed") +
+  #geom_line(aes(y=extreme_set, color="extreme_set"), linetype="dashed") +
+  geom_line(aes(y=avg_temp, color=treatment)) +
+  scale_color_manual(name = "",
+                     values = c("chill" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00"),
+                     labels = c("chill" = "Ambient Treatment", "severe" = "Severe MHW", "extreme" = "Extreme MHW")) +
+#  scale_color_manual(name = "Treatment",
+#                     values = c("chill" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00",
+#                                "chill_set" = "#003D52", "severe_set" = "#C28200", "extreme_set" = "#A53E00"),
+#                     labels = c("chill" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW",
+#                                "chill_set" = "Ambient Set Point", "severe_set" = "Severe Set Point", "extreme_set" = #"Extreme Set Point"),
+#                     guide=guide_legend(override.aes = list(keyheight=10,alpha=1))) +
+  scale_y_continuous(breaks = seq(12, 26, 2), limits = c(12, 27)) +
+  theme_minimal() +
+  labs(x = "Date",
+       y = "Temperature") +
+  theme(legend.position = "top")
+
+ggarrange(plot_set, plot_avg, ncol = 1)
+
+ggsave(here("experiment", "figures", "avg_tank_temp_stacked.png"), width=12, height=9)
 ```
