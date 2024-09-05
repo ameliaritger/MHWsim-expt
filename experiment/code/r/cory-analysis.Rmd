@@ -23,7 +23,7 @@ source("readBodySizeData.R", local = knitr::knit_global())
 ```{r}
 alive <- read_csv(here("experiment", "data", "mortality.csv")) %>% #each file will be read in, specify which columns you need read in to avoid any error
   clean_names() %>%
-  mutate(date = if_else(mdy(date) == "2024-01-31", mdy(date)-days(1), mdy(date))) #correct for date discrepancy between measurements
+  mutate(date = if_else(mdy(date) == ymd("2024-01-31"), mdy(date)-days(1), mdy(date))) #correct for date discrepancy between measurements
   #arrange(date) %>%
          #treatment = ifelse(tank < 6, "cold", ifelse(tank>10, "extreme", "severe")),
          #tank=as.factor(tank)) %>%
@@ -96,16 +96,6 @@ all <- full_join(open, alive, by=join_by(date==date, tank==tank, genet==genet)) 
   ungroup() %>%
   filter(!is.na(date))
 ```
-
-
-```{r}
-#plot total_biomass over time
-ggplot(all, aes(x=date, y=total_biomass_true)) +
-  geom_point(aes(color=genet), size=0.5) +
-  geom_smooth(aes(fill=genet, color=genet), method="lm", se=T) +
-  facet_wrap(~treatment)
-```
-
 
 ```{r}
 # run linear regression of growth rate x date for each genet
@@ -212,7 +202,7 @@ p <- ggplot(all, aes(x=date, y=growth_rate_cont, color=genet, shape=mhw)) +
   geom_point(alpha=0.15) +
   facet_wrap(~factor(treatment, levels=c("cold", "severe", "extreme"), labels=c("Ambient", "Severe MHW", "Extreme MHW"))) + 
   geom_smooth(method = "lm", se = FALSE) +
-  #stat_poly_eq(use_label("eq"), formula = y ~ x, parse = TRUE) +  
+  #stat_poly_eq(use_label("eq"), formula = y ~ x, parse = TRUE) +  #un-comment this to get updated values to add to label_plot
   geom_rect(aes(xmin = as.Date("2023-11-30"), xmax = as.Date("2023-12-10"), ymin = -5, ymax = -4.5), color = "dimgray", fill = "dimgray", alpha = 0.2) +  # Add horizontal bar
     geom_rect(aes(xmin = as.Date("2024-02-14"), xmax = as.Date("2024-02-21"), ymin = -5, ymax = -4.5), color = "dimgray", fill = "dimgray", alpha = 0.2) +  # Add horizontal bar
   geom_vline(xintercept = as.Date("2023-12-10"), linetype = "dashed") +  # Add vertical line delineating during/after MHW
