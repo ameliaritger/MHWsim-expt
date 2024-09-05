@@ -65,6 +65,7 @@ temp_2 <- temp_2 %>%
 
 # Plot tank temps
 ```{r}
+# Assign treatments to each temperature probe
 chill = c("x28_00000eb5045f","x28_00000eb3fd89","x28_00000eb42add","x28_00000eb51050","x28_00000eb4cb62")
 severe = c("x28_00000eb50e10","x28_00000eb501b0", "x28_00000eb496d2", "x28_00000eb3cf7d", "x28_00000eb52c32")
 extreme = c("x28_00000ec23ab6","x28_00000ec25534","x28_00000eb4b7e0", "x28_00000ec24f93", "x28_00000eb4619b")
@@ -108,7 +109,7 @@ temp_sorted <- temp_clean %>%
   group_by(timestamp, chill_set, severe_set, extreme_set, treatment) %>%
   summarize(avg_temp = mean(temperature, na.rm=TRUE)) %>%
   ungroup() %>%
-  filter(timestamp > ymd_hms("2023-09-22 12:00:00")) #only keep data since addition of Corynactis
+  filter(timestamp > ymd_hms("2023-09-22 12:00:00")) #remove first 24 hours after addition of Corynactis because temperature fluctuations as I was messing around with heaters/chillers
 
 plot_avg <- ggplot(temp_sorted, aes(x=timestamp)) +
   #geom_line(aes(y=chill_set, color="chill_set"), linetype="dashed") +
@@ -132,5 +133,5 @@ plot_avg <- ggplot(temp_sorted, aes(x=timestamp)) +
 
 ggarrange(plot_set, plot_avg, ncol = 1)
 
-ggsave(here("experiment", "figures", "avg_tank_temp_stacked.png"), width=12, height=9)
+#ggsave(here("experiment", "figures", "avg_tank_temp_stacked.png"), width=12, height=9)
 ```
