@@ -12,6 +12,7 @@ library(janitor)
 library(here)
 library(lubridate)
 library(ggpmisc) #statpolyeq ggplot
+library(forecast) #ARIMA
 ```
 
 # Load Tidied Data
@@ -259,29 +260,182 @@ ggplot(all, aes(x=date, y=dying_dead, color = treatment)) +
 
 # Start running stats
 
-## Basic ANOVA
+## Count data - GLARMA 
 ```{r}
-sample_anova <-aov(data=all,diff_n~genet+treatment)
-summary(sample_anova)
-TukeyHSD(sample_anova, which="genet")
 
-#ggsave(here("experiment", "figures", "compare.png"), width=12, height=7)
+```
+
+## Body size data - Autoregression
+### Log transform data
+```{r}
+all_transform <- all %>%
+  filter(!is.na(avg_size)) %>%
+  mutate(avg_size_log = log(avg_size))
+
+# histogram of raw data
+ggplot(all_transform, aes(x=avg_size)) +
+  geom_histogram(binwidth=0.1) +
+  labs(x = "Average body size (mm)",
+       y = "Frequency")
+# raw data density plot
+ggplot(all_transform, aes(x = avg_size)) +
+  geom_density() +
+  ggtitle("Density Plot of Original Data")
+# Q-Q plot of original data
+qqnorm(all_transform$avg_size)
+qqline(all_transform$avg_size, col = "red")
+
+# histogram of transformed data
+ggplot(all_transform, aes(x=avg_size_log)) +
+  geom_histogram(binwidth=0.1) +
+  labs(x = "log(Average body size (mm))",
+       y = "Frequency")
+# transformed data density plot
+ggplot(all_transform, aes(x = avg_size_log)) +
+  geom_density() +
+  ggtitle("Density Plot of Transformed Data")
+# Q-Q plot of log-transformed data
+qqnorm(all_transform$avg_size_log)
+qqline(all_transform$avg_size_log, col = "red")
+```
+It's not perfectly normal but definitely better log-transformed
+
+```{r}
+# Perform ADF test to check if data is stationary
+adf.test(all_transform$avg_size_log)
+# Plot ACF and PACF for the stationary log-transformed body size
+Acf(all_transform$avg_size_log)
+Pacf(all_transform$avg_size_log)
+
+diff_series <- diff(all_transform$avg_size_log)
+Acf(diff_series, main = "ACF of Differenced Series")
+Pacf(diff_series, main = "PACF of Differenced Series")
+```
+Seasonal cycle has lag of 5 for whatever reason
+
+```{r}
+# Seasonal differencing
+diff_series_seasonal <- diff(all_transform$avg_size_log, lag = 5)
+
+Acf(diff_series_seasonal, main = "Seasonal ACF of Differenced Series")
+Pacf(diff_series_seasonal, main = "Seasonal PACF of Differenced Series")
+```
+According to ChatGPT:
+*Strong Peak at Lag 5 in ACF:*
+The significant negative peak at lag 5 in the ACF suggests a strong seasonal effect with a period of 5 time units. This indicates that the data has a seasonal pattern with a period of 5 lags.
+
+*Wave Pattern in ACF:*
+The wave-like pattern with small positive and negative values elsewhere suggests that the seasonality is prominent at lag 5, but the data beyond this lag doesn’t exhibit strong autocorrelation. This is typical in many time series where the primary seasonality is evident at specific lags, and other autocorrelations diminish.
+
+*Strong Peak at Lag 5 in PACF:*
+A strong peak at lag 5 in the PACF suggests that there is a significant seasonal autoregressive (AR) component. This means that past values separated by a season (5 lags in your case) have a strong influence on the current value.
+
+*Wave Pattern in PACF:*
+The wave-like pattern with small values elsewhere in the PACF indicates that the influence of past values diminishes quickly after lag 5, reinforcing the idea that lag 5 is the primary seasonal effect.
+
+**Determining Seasonal AR and MA Orders**
+*Seasonal AR (PP):*
+Since the PACF shows a strong peak at lag 5 and then cuts off or shows a diminishing pattern, it indicates a seasonal AR component. You might start with P=1 or P=2, but the specific choice will depend on how well it fits the data. In this case, P could be 1 if the PACF cuts off or diminishes significantly after lag 5.
+
+*Seasonal MA (QQ):*
+The ACF shows a strong peak at lag 5 and then diminishes. This suggests that a seasonal MA component is appropriate. Typically, Q=1 is a good starting point, but it can be adjusted based on model performance.
+
+*Seasonal Differencing (DD):*
+If the seasonal pattern persists despite differencing, you might need to include seasonal differencing (DD). Since your ACF and PACF both show strong patterns at lag 5, D=1 is likely appropriate to handle seasonal trends.
+
+```{r}
+fit_auto <- auto.arima(all_transform$avg_size_log, seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
+summary(fit_auto)
+residuals_auto <- residuals(fit_auto)
+plot(residuals_auto, main = "Residuals of AUTOSARIMA Model")
+Acf(residuals_auto, main = "ACF of Residuals")
+Box.test(residuals_auto, type = "Ljung-Box")
 ```
 
 ```{r}
-# run linear regression of growth rate x date for each genet
-model <- all %>%
-  filter(mhw == "after",
-         treatment == "extreme") %>%
-  group_by(genet) %>%
-  do(model=lm(growth_rate ~ date, data = .))
+# Fit ARIMA with different seasonal orders
+model1 <- Arima(all_transform$avg_size_log, order = c(5, 1, 1), seasonal = list(order = c(1, 1, 1), period = 5))
+model3 <- Arima(all_transform$avg_size_log, order = c(5, 1, 1), seasonal = list(order = c(1, 1, 1), period = 5))
 
-#extract equation for each genet
-eq <- model %>%
-  do(eq = paste0("y = ", format(coef(.$model)[1], digits = 2),
-                " + ", format(coef(.$model)[2], digits = 2), "x")) %>%
-  bind_cols(genet = model$genet) #add back in genet column from model df
+Acf(residuals(model1), main = paste("ACF of Residuals model1"))
+Pacf(residuals(model1), main = paste("PACF of Residuals model1"))
 
-all_filter <- all %>%
-  select(date, tank, genet, alive, splitting, diff_n_cont)
+Acf(residuals(model2), main = paste("ACF of Residuals model2"))
+Pacf(residuals(model2), main = paste("PACF of Residuals model2"))
+
+Acf(residuals(model3), main = paste("ACF of Residuals model3"))
+Pacf(residuals(model3), main = paste("PACF of Residuals model3"))
+
+Box.test(residuals(model1), lag = 20, type = "Ljung-Box")
+Box.test(residuals(model2), lag = 20, type = "Ljung-Box")
+Box.test(residuals(model3), lag = 20, type = "Ljung-Box")
 ```
+
+```{r}
+# Fit the model
+fit <- Arima(all_transform$avg_size_log, order = c(5, 1, 1), seasonal = list(order = c(1, 1, 1), period = 5))
+
+# Residuals and Diagnostics
+plot(residuals_fit, main = "Residuals")
+Acf(residuals_fit, main = "ACF of Residuals")
+Pacf(residuals_fit, main = "PACF of Residuals")
+qqnorm(residuals_fit, main = "QQ Plot of Residuals")
+qqline(residuals_fit)
+```
+
+
+
+```{r}
+fit_auto <- auto.arima(all_transform$avg_size_log, seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
+summary(fit_auto)
+residuals_auto <- residuals(fit_auto)
+plot(residuals_auto, main = "Residuals of AUTOSARIMA Model")
+Acf(residuals_auto, main = "ACF of Residuals")
+Box.test(residuals_auto, type = "Ljung-Box")
+```
+
+```{r}
+# Fit SARIMA model
+fit_sarima <- arima(all_transform$avg_size_log,
+                     order = c(2, 1, 1),            # Non-seasonal orders (p, d, q)
+                     seasonal = list(order = c(1, 1, 1), period = 5)) # (P, D, Q)
+summary(fit_sarima)
+residuals_sarima <- residuals(fit_sarima)
+plot(residuals_sarima, main = "Residuals of SARIMA Model") + abline(h = 0, col = "red", lty = 2)
+Acf(residuals_sarima, main = "ACF of Residuals")
+Pacf(residuals_sarima, main = "PACF of Residuals")
+Box.test(residuals_sarima, type = "Ljung-Box")
+```
+
+
+```{r}
+# Fit an ARIMA model for each treatment and color
+# Create a function to fit ARIMA model for each subset of data
+fit_arima <- function(all_transform) {
+  # Fit ARIMA model on the log-transformed body size
+  arima_model <- Arima(all_transform$avg_size_log, order = c(5, 1, 1), seasonal = list(order = c(1, 1, 1), period = 5))
+  return(arima_model)
+}
+
+# Apply the function to each combination of treatment and color
+models <- all_transform %>%
+  group_by(treatment, genet, mhw) %>%
+  group_modify(~ {
+    model <- fit_arima(.x)
+    tibble(model = list(model))
+  })
+
+# Check the fitted models
+models
+
+# To predict future values, use the fitted model on new data
+# Example for one combination of treatment and color
+example_model <- models$model[1]
+future_predictions <- forecast(example_model, h = 10)  # Forecast 10 periods ahead
+
+# Print the forecasted values
+print(future_predictions)
+```
+
+
+
