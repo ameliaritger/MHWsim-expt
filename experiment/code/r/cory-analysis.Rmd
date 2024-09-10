@@ -5,8 +5,9 @@ date: "2023-11-01"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+# Load packages 
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
 library(tidyverse)
 library(janitor)
 library(here)
@@ -14,12 +15,15 @@ library(lubridate)
 library(ggpmisc) #statpolyeq ggplot
 library(forecast) #ARIMA
 library(tseries) #ADF test
+library(urca) #KPSS test
 library(forecast) #ts()
 library(ggrepel) #geom_text_repel
+library(broom) #tidy()
+library(gridExtra) #grid.arrange()
 ```
 
 # Load Tidied Data
-```{r}
+```{r, include = FALSE}
 source("mergeAllData.R", local = knitr::knit_global())
 ```
 
@@ -35,7 +39,7 @@ ggplot(all, aes(x=date, y=diff_n_cont, color=genet)) +
 ```
 
 ## Plot basic growth rate across entire experiment
-```{r}
+```{r, fig.width=10}
 ggplot(all, aes(x=date, y=growth_rate_cont, color=genet)) +
   facet_wrap(~treatment,
              labeller =  labeller(treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
@@ -70,7 +74,7 @@ ggplot(all, aes(x=date, y=growth_rate, color = treatment)) +
 ```
 
 ## Plot growth rate of each genet during and after MHW
-```{r}
+```{r, fig.width=10, fig.height=7}
 ggplot(all, aes(x=date, y=growth_rate, color = genet)) +
   geom_point(alpha=0.1) +
   facet_grid(mhw~treatment, 
@@ -167,7 +171,7 @@ g
 ```
 
 ## Plot behavior data
-```{r}
+```{r, fig.width=10}
 # %closed facet grid
 ggplot(all, aes(x=genet, y=percent_closed, fill=genet, group=genet)) +
   geom_point(aes(color=genet)) +
@@ -207,7 +211,7 @@ ggplot(all, aes(x = genet, y = percent_fully_open, fill = genet, group = interac
 
 ## Plot total biomass over time
 ```{r}
-ggplot(all, aes(x=date, y=total_biomass_true)) +
+ggplot(all, aes(x=date, y=total_biomass)) +
   geom_point(aes(color=genet), size=0.5) +
   geom_smooth(aes(fill=genet, color=genet), method="lm", se=T) +
   facet_wrap(~treatment,
@@ -268,7 +272,10 @@ ggplot(all, aes(x=date, y=dying_dead, color = treatment)) +
 
 ```
 
-## Body size data - Autoregression
+## Body size data - ARIMA forecasting
+https://stats.stackexchange.com/questions/281666/how-does-acf-pacf-identify-the-order-of-ma-and-ar-terms
+https://stats.stackexchange.com/questions/32634/difference-time-series-before-arima-or-within-arima
+
 ### Log transform data
 ```{r}
 all_size <- all %>%
@@ -311,8 +318,8 @@ ggplot(all_size, aes(x=date)) +
        y = "Frequency")
 ```
 
-### Plot a slightly more complex vis of the differenced data
-```{r}
+### Plot a slightly more complex vis of the first differenced data
+```{r, fig.width=10}
 # Fit linear models and extract coefficients
 models <- all_size %>%
   group_by(treatment, genet, mhw) %>%
@@ -328,9 +335,9 @@ models <- all_size %>%
   ungroup() %>%
   select(-mhw)
 
-# Join regression equations back to the original data
+# Join regression equations with the original data
 all_size_reg <- all_size %>%
-  left_join(models, by = c("treatment", "genet"))
+  left_join(models, by = c("treatment", "genet"), relationship = "many-to-many")
 
 ggplot(all_size_reg) +
   geom_point(aes(x=date, y=avg_size_diff, color=genet), alpha=0.3) +
@@ -343,6 +350,7 @@ ggplot(all_size_reg) +
 
 #ggsave(here("experiment", "figures", "body_size_regression.png"), width=15, height=7)
 ```
+
 ### Run ADF and KPSS tests on first and second differenced data
 ```{r}
 # List to store results
@@ -353,7 +361,7 @@ for (group in unique(all_size$treatment)) {
   group_data <- all_size %>%
     filter(treatment == group,
            !is.na(avg_size_diff2)) %>%
-    pull(avg_size_diff2)
+    pull(avg_size_diff2) #chnage this to avg_size_diff for first differenced data
   # Perform the ADF test
   adf_test <- adf.test(group_data, alternative = "stationary")
   # Store the result
@@ -370,7 +378,7 @@ for (group in unique(all_size$treatment)) {
   group_data <- all_size %>%
     filter(treatment == group,
            !is.na(avg_size_diff2)) %>%
-    pull(avg_size_diff2)
+    pull(avg_size_diff2) #chnage this to avg_size_diff for first differenced data
   # Perform the KPSS test
   kpss_test <- ur.kpss(group_data, type = "mu")  # Use "tau" if you expect trend stationarity
   # Store the result
@@ -393,7 +401,7 @@ Pacf(all_size$avg_size_diff, main = "PACF of Differenced Series")
 Acf(all_size$avg_size_diff2, main = "ACF of 2-Differenced Series")
 Pacf(all_size$avg_size_diff2, main = "PACF of 2-Differenced Series")
 ```
-There is definitely a lot of autocorrelation with the data, for both 1-diff and 2-diff. Makes sense because body size should be highly correlated over time...
+There is definitely a lot of autocorrelation with the data, for both 1-diff and 2-diff. Makes sense because body size should be highly correlated over time.
 
 ### Remove NA values and convert factors to numeric
 ```{r}
@@ -405,14 +413,16 @@ all_size_na <- all_size %>%
   select(date, tank, genet, n, treatment, mhw, avg_size, avg_size_log, avg_size_diff, avg_size_diff2)
 ```
 
-### Auto ARIMA - basic
+### First-differenced data
+
+#### Auto ARIMA - basic
 ```{r}
 autoArima <- auto.arima(all_size_na$avg_size_diff, seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
 summary(autoArima)
 ```
 I ran this all again with second-differenced data, and the model doesn't appear significantly better (in some cases like BIC, not better) and so it doesn't justify the added complexity of a second-differenced model. so let's stick with first-differenced model.
 
-### Check model residuals
+#### Check model residuals
 ```{r}
 residuals_auto <- residuals(autoArima)
 plot(residuals_auto, main = "Residuals of AUTOSARIMA Model")
@@ -439,7 +449,7 @@ AR(1) model: This is autoregressive data, and the current value of the time seri
 I(1): First-order differencing applied to make the series stationary - which makes sense because preliminary analyses showed slope of zero with second-differenced data. 
 MA(2): current value of the time series depends on the last two periods’ forecast errors - means that the current value of the series depends on the errors made in the previous two periods, which doesn't make a ton of intuitive sense except maybe if there are big changes to body size (i.e. reproduction?) that just means we won't see those changes finish until 2 weeks later? <<< CHECK THIS LOGIC.
 
-### Check ts trends/seasonality
+#### Check ts trends/seasonality
 ```{r}
 all_size_ts <- ts(all_size_na$avg_size_diff, frequency = 52) #weekly data as ts object
 class(all_size_ts)
@@ -452,7 +462,7 @@ plot(decomposition)
 ```
 There's no apparent seasonality and a slight positive trend in the data
 
-### Fit ARIMA with different MA values
+#### Fit ARIMA with different I values
 ```{r}
 # Fit ARIMA with different seasonal orders
 model1 <- Arima(all_size_na$avg_size_diff, order = c(1, 1, 1))
@@ -472,9 +482,9 @@ Box.test(residuals(model1), lag = 20, type = "Ljung-Box")
 Box.test(residuals(model2), lag = 20, type = "Ljung-Box")
 Box.test(residuals(model3), lag = 20, type = "Ljung-Box")
 ```
-MA(2) is definitely the best fit. 
+I(2) is definitely the best fit. 
 
-### Consider potential covariates
+#### Consider potential covariates
 ```{r}
 #create matrix of dummy variables incorporating all potential covariates
 xreg_All <- model.matrix(~ treatment + genet + mhw - 1, data = all_size_na)
@@ -496,6 +506,16 @@ summary(arima_covariates_treatment)
 ```
 Looks like genet is not a significant covariate, but treatment and during/after MHW are slightly impactful. <<< DISCUSS WITH CHRIS.
 
+Auto-ARIMA with Covariates model (check AR, I, MA)
+```{r}
+xreg_Covariate <- model.matrix(~ genet + mhw - 1, data = all_size_na)
+
+autoArima_Covariate <- auto.arima(all_size_na$avg_size_diff, seasonal = TRUE, stepwise = FALSE, approximation = FALSE, xreg = xreg_Covariate)
+summary(autoArima_Covariate)
+```
+No change to AR, I, or MA with any of the potential covariates.
+
+*So, for first-differenced data, here are the two model options*
 #### 
 Basic ARIMA(1,1,2): 
 Coefficients:
@@ -524,7 +544,7 @@ AIC=-4506.35   AICc=-4506.28   BIC=-4475.1
 Training set 0.001324029 0.04527702 0.03477904 NaN  Inf 0.7847113 -0.008522662
 ####
 
-### Check model residuals for MHW/Treatment ARIMA
+#### Check model residuals for MHW/Treatment ARIMA
 ```{r}
 residuals_auto <- residuals(arima_covariates_noGenet)
 plot(residuals_auto, main = "Residuals of AUTOSARIMA Model")
@@ -546,15 +566,227 @@ plot(fitted_values, residuals_auto, main="Residuals vs Fitted Values")
 abline(h=0, col="red")
 ```
 
+### Now, let's check out ARIMA models on second-differenced data (since it is technically more stationary)
 ```{r}
-# To predict future values, use the fitted model on new data
-# Example for one combination of treatment and color
-example_model <- models$model[1]
-future_predictions <- forecast(example_model, h = 10)  # Forecast 10 periods ahead
-
-# Print the forecasted values
-print(future_predictions)
+autoArima2 <- auto.arima(all_size_na$avg_size_diff2, seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
+summary(autoArima2)
 ```
 
+AR(1) model: This is autoregressive data, and the current value of the time series depends linearly on its immediately preceding value - makes sense because body size shouldn't change that drastically week by week. 
+I(0): No differencing applied to make the series stationary - which makes sense because the body size data has been differenced twice which we know makes it stationary.
+MA(4): current value of the time series depends on the last FOUR periods’ forecast errors - means that the current value of the series depends on the errors made in the previous four periods. Greater value than first-differenced data model MA(2). Meaning??
 
+#### Check model residuals
+```{r}
+residuals_auto2 <- residuals(autoArima2)
+plot(residuals_auto2, main = "Residuals of AUTOSARIMA Model")
+Acf(residuals_auto2, main = "ACF of Residuals")
+Box.test(residuals_auto2, type = "Ljung-Box")
+
+adf_test_residuals2 <- adf.test(residuals_auto2, alternative = "stationary") #definitely stationary
+qqnorm(residuals_auto2)
+qqline(residuals_auto2)
+shapiro.test(residuals_auto2)
+
+ggplot() +
+  geom_histogram(aes(x = residuals_auto2), bins = 20, color = "black") +
+  labs(x = "Residuals",
+       y = "Frequency")
+
+fitted_values2 <- fitted(autoArima2)
+plot(fitted_values2, residuals_auto2, main="Residuals vs Fitted Values")
+abline(h=0, col="red")
+```
+Shapiro-Wilks test says residuals are close to normal distribution but not normally distributed... but the plots look fine.
+
+#### Consider potential covariates
+```{r}
+#create matrix of dummy variables incorporating all potential covariates
+xreg_All <- model.matrix(~ treatment + genet + mhw - 1, data = all_size_na)
+xreg_NoGenet <- model.matrix(~ treatment + mhw - 1, data = all_size_na)
+xreg_NoTreatment <- model.matrix(~ genet + mhw - 1, data = all_size_na)
+xreg_NoMHW <- model.matrix(~ treatment + genet - 1, data = all_size_na)
+xreg_MHW <- model.matrix(~ mhw - 1, data = all_size_na)
+xreg_Treatment <- model.matrix(~ treatment - 1, data = all_size_na)
+xreg_Genet <- model.matrix(~ genet - 1, data = all_size_na)
+
+arima_no_covariates2 <- Arima(all_size_na$avg_size_diff2, order = c(1, 0, 4))
+summary(arima_no_covariates2)
+
+arima_covariates_all2 <- Arima(all_size_na$avg_size_diff2, order = c(1, 0, 4), xreg = xreg_All)
+summary(arima_covariates_all2)
+
+arima_covariates_noGenet2 <- Arima(all_size_na$avg_size_diff2, order = c(1, 0, 4), xreg = xreg_NoGenet)
+summary(arima_covariates_noGenet2)
+
+arima_covariates_noTreatment2 <- Arima(all_size_na$avg_size_diff2, order = c(1, 0, 4), xreg = xreg_NoTreatment)
+summary(arima_covariates_noTreatment2)
+
+arima_covariates_noMHW2 <- Arima(all_size_na$avg_size_diff2, order = c(1, 0, 4), xreg = xreg_NoMHW)
+summary(arima_covariates_noMHW2)
+
+arima_covariates_Genet2 <- Arima(all_size_na$avg_size_diff2, order = c(1, 0, 4), xreg = xreg_Genet)
+summary(arima_covariates_Genet2)
+
+arima_covariates_mhw2 <- Arima(all_size_na$avg_size_diff2, order = c(1, 0, 4), xreg = xreg_MHW)
+summary(arima_covariates_mhw2)
+
+arima_covariates_treatment2 <- Arima(all_size_na$avg_size_diff2, order = c(1, 0, 4), xreg = xreg_Treatment)
+summary(arima_covariates_treatment2)
+```
+TreatmentxGenetxMHW model performs the worst. TreatmentxMHW, GenetxMHW, TreatmentxGenet perform second worst. No covariates performs best, Treatment alone, Genet alone, and MHW alone all perform second best. This probably means we should use no covariates in second-differenced data model?
+
+Auto-ARIMA with Covariates model (check AR, I, MA)
+```{r}
+xreg_Covariate2 <- model.matrix(~ treatment + genet + mhw - 1, data = all_size_na)
+
+autoArima_Covariate2 <- auto.arima(all_size_na$avg_size_diff2, seasonal = TRUE, stepwise = FALSE, approximation = FALSE, xreg = xreg_Covariate2)
+summary(autoArima_Covariate2)
+```
+Same as first-differenced data, no change to AR, I, or MA with any of the potential covariates.
+
+*For second-differenced data, here is the apparent best model option*
+####
+Series: all_size_na$avg_size_diff2 
+ARIMA(1,0,4) with zero mean 
+Coefficients:
+         ar1      ma1     ma2      ma3      ma4
+      0.9289  -0.7029  0.0217  -0.0357  -0.1054
+s.e.  0.0412   0.0506  0.0356   0.0353   0.0303
+
+sigma^2 = 0.005237:  log likelihood = 1541.35
+AIC=-3070.71   AICc=-3070.64   BIC=-3039.8
+
+Training set error measures:
+                       ME      RMSE        MAE       MPE    MAPE      MASE
+Training set 0.0007083893 0.0722271 0.05541204 -20.12162 319.208 0.7668489
+                    ACF1
+Training set 0.000179781
+#### 
+
+### Plot differenced data with O.G. values
+
+#### Genet only
+```{r, fig.width=10}
+# Create the plots
+plot_undifferenced <- ggplot(all_size_na, aes(x = date, y = avg_size_log, group=as.factor(genet))) +
+  geom_point(aes(color=as.factor(genet)), alpha=0.3) +
+  geom_smooth(aes(color=as.factor(genet)), method="lm") +
+  ggtitle("Undifferenced Data") +
+  xlab("Date") +
+  ylab("Log Body size (mm)") +
+  theme_bw()
+
+plot_differenced <- ggplot(all_size_na, aes(x = date, y = avg_size_diff, group=as.factor(genet))) +
+  geom_point(aes(color=as.factor(genet)), alpha=0.3) +
+  geom_smooth(aes(color=as.factor(genet)), method="lm") +
+  ggtitle("Differenced Data") +
+  xlab("Date") +
+  ylab("Differenced Body Size (mm)") +
+  theme_bw()
+
+plot_differenced2 <- ggplot(all_size_na, aes(x = date, y = avg_size_diff2, group=as.factor(genet))) +
+  geom_point(aes(color=as.factor(genet)), alpha=0.3) +
+  geom_smooth(aes(color=as.factor(genet)), method="lm") +
+  ggtitle("2-Differenced Data") +
+  xlab("Date") +
+  ylab("2-Differenced Body Size (mm)") +
+  theme_bw()
+
+combined_plot <- grid.arrange(plot_undifferenced, plot_differenced, plot_differenced2, ncol = 3)
+
+#ggsave(here("experiment", "figures", "differenced_comparison_genet.png"), combined_plot, width=14, height=7)
+```
+Well damn, that makes sense why genet is not a significant covariate in the differenced data models! 
+
+#### Treatment only
+```{r, fig.width=10}
+# Create the plots
+plot_undifferenced <- ggplot(all_size_na, aes(x = date, y = avg_size_log, group=as.factor(treatment))) +
+  geom_point(aes(color=as.factor(treatment)), alpha=0.3) +
+  geom_smooth(aes(color=as.factor(treatment)), method="lm") +
+  ggtitle("Undifferenced Data") +
+  xlab("Date") +
+  ylab("Log Body size (mm)") +
+  theme_bw()
+
+plot_differenced <- ggplot(all_size_na, aes(x = date, y = avg_size_diff, group=as.factor(treatment))) +
+  geom_point(aes(color=as.factor(treatment)), alpha=0.3) +
+  geom_smooth(aes(color=as.factor(treatment)), method="lm") +
+  ggtitle("Differenced Data") +
+  xlab("Date") +
+  ylab("Differenced Body Size (mm)") +
+  theme_bw()
+
+plot_differenced2 <- ggplot(all_size_na, aes(x = date, y = avg_size_diff2, group=as.factor(treatment))) +
+  geom_point(aes(color=as.factor(treatment)), alpha=0.3) +
+  geom_smooth(aes(color=as.factor(treatment)), method="lm") +
+  ggtitle("2-Differenced Data") +
+  xlab("Date") +
+  ylab("2-Differenced Body Size (mm)") +
+  theme_bw()
+
+combined_plot <- grid.arrange(plot_undifferenced, plot_differenced, plot_differenced2, ncol = 3)
+
+#ggsave(here("experiment", "figures", "differenced_comparison_treatment.png"), combined_plot, width=14, height=7)
+```
+No difference in linear slope between three treatments
+
+#### MHW only
+```{r, fig.width=10}
+# Create the plots
+plot_undifferenced <- ggplot(all_size_na, aes(x = date, y = avg_size_log, group=as.factor(mhw))) +
+  geom_point(aes(color=as.factor(mhw)), alpha=0.3) +
+  geom_smooth(aes(color=as.factor(mhw)), method="lm") +
+  ggtitle("Undifferenced Data") +
+  xlab("Date") +
+  ylab("Log Body size (mm)") +
+  theme_bw()
+
+plot_differenced <- ggplot(all_size_na, aes(x = date, y = avg_size_diff, group=as.factor(mhw))) +
+  geom_point(aes(color=as.factor(mhw)), alpha=0.3) +
+  geom_smooth(aes(color=as.factor(mhw)), method="lm") +
+  ggtitle("Differenced Data") +
+  xlab("Date") +
+  ylab("Differenced Body Size (mm)") +
+  theme_bw()
+
+plot_differenced2 <- ggplot(all_size_na, aes(x = date, y = avg_size_diff2, group=as.factor(mhw))) +
+  geom_point(aes(color=as.factor(mhw)), alpha=0.3) +
+  geom_smooth(aes(color=as.factor(mhw)), method="lm") +
+  ggtitle("2-Differenced Data") +
+  xlab("Date") +
+  ylab("2-Differenced Body Size (mm)") +
+  theme_bw()
+
+combined_plot <- grid.arrange(plot_undifferenced, plot_differenced, plot_differenced2, ncol = 3)
+
+#ggsave(here("experiment", "figures", "differenced_comparison_mhw.png"), combined_plot, width=14, height=7)
+```
+MHW slope is definitely different in undifferenced data.
+
+### Use basic first-differenced ARIMA to forecast.
+```{r}
+future_predictions <- forecast(autoArima, h = 50)  # Forecast h periods ahead
+
+plot(future_predictions)
+```
+
+Just for conceptual understanding, create a quick autoARIMA model on undifferenced data and plot forecast
+```{r}
+autoArima_undiff <- auto.arima(all_size_na$avg_size_log, seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
+summary(autoArima_undiff)
+
+future_predictions <- forecast(autoArima_undiff, h = 50)  # Forecast h periods ahead
+plot(future_predictions)
+```
+
+### TL;DR First Differenced AutoARIMA model = ARIMA(1,1,2)
+
+## Body size data - MARSS, what we should have been doing all along...
+https://atsa-es.github.io/MARSS/
+
+```{r}
+all_size_marss <- all_size
+```
 
