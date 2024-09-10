@@ -13,6 +13,9 @@ library(here)
 library(lubridate)
 library(ggpmisc) #statpolyeq ggplot
 library(forecast) #ARIMA
+library(tseries) #ADF test
+library(forecast) #ts()
+library(ggrepel) #geom_text_repel
 ```
 
 # Load Tidied Data
@@ -268,94 +271,193 @@ ggplot(all, aes(x=date, y=dying_dead, color = treatment)) +
 ## Body size data - Autoregression
 ### Log transform data
 ```{r}
-all_transform <- all %>%
+all_size <- all %>%
   filter(!is.na(avg_size)) %>%
   mutate(avg_size_log = log(avg_size))
 
-# histogram of raw data
-ggplot(all_transform, aes(x=avg_size)) +
-  geom_histogram(binwidth=0.1) +
+# scatter plot of transformed data
+ggplot(all_size, aes(x=date, y=avg_size_log)) +
+  geom_point(aes(color=treatment)) +
   labs(x = "Average body size (mm)",
        y = "Frequency")
-# raw data density plot
-ggplot(all_transform, aes(x = avg_size)) +
-  geom_density() +
-  ggtitle("Density Plot of Original Data")
-# Q-Q plot of original data
-qqnorm(all_transform$avg_size)
-qqline(all_transform$avg_size, col = "red")
-
 # histogram of transformed data
-ggplot(all_transform, aes(x=avg_size_log)) +
+ggplot(all_size, aes(x=avg_size_log)) +
   geom_histogram(binwidth=0.1) +
   labs(x = "log(Average body size (mm))",
        y = "Frequency")
 # transformed data density plot
-ggplot(all_transform, aes(x = avg_size_log)) +
+ggplot(all_size, aes(x = avg_size_log)) +
   geom_density() +
   ggtitle("Density Plot of Transformed Data")
 # Q-Q plot of log-transformed data
-qqnorm(all_transform$avg_size_log)
-qqline(all_transform$avg_size_log, col = "red")
+qqnorm(all_size$avg_size_log)
+qqline(all_size$avg_size_log, col = "red")
 ```
-It's not perfectly normal but definitely better log-transformed
+It's not perfectly normal but definitely better log-transformed. Looks a bit like exponential decay, so let's make the data stationary by differencing.
 
+### Difference to make the data stationary
 ```{r}
-# Perform ADF test to check if data is stationary
-adf.test(all_transform$avg_size_log)
-# Plot ACF and PACF for the stationary log-transformed body size
-Acf(all_transform$avg_size_log)
-Pacf(all_transform$avg_size_log)
+all_size <- all_size %>%
+  group_by(tank, genet) %>%
+  mutate(avg_size_diff = avg_size_log - lag(avg_size_log),
+         avg_size_diff2 = avg_size_diff - lag(avg_size_diff)) #need second order differencing for slope=0
 
-diff_series <- diff(all_transform$avg_size_log)
-Acf(diff_series, main = "ACF of Differenced Series")
-Pacf(diff_series, main = "PACF of Differenced Series")
+ggplot(all_size, aes(x=date)) +
+  geom_point(aes(y=avg_size_diff), color="black", alpha=0.3) +
+  geom_point(aes(y=avg_size_diff2), color="blue", alpha=0.3) +
+  geom_smooth(aes(y=avg_size_diff), method="lm", color="black") +
+  geom_smooth(aes(y=avg_size_diff2), method="lm", color="blue") +
+  labs(x = "Average body size (mm)",
+       y = "Frequency")
 ```
-Seasonal cycle has lag of 5 for whatever reason
 
+### Plot a slightly more complex vis of the differenced data
 ```{r}
-# Seasonal differencing
-diff_series_seasonal <- diff(all_transform$avg_size_log, lag = 5)
+# Fit linear models and extract coefficients
+models <- all_size %>%
+  group_by(treatment, genet, mhw) %>%
+  do(tidy(lm(avg_size_diff ~ date, data = .))) %>%
+  select(treatment, genet, term, estimate) %>%
+  pivot_wider(names_from = term, values_from = estimate) %>%
+  mutate(equation = sprintf("y = %.2f + %.2e * x", `(Intercept)`, date)) %>%
+  rename(slope = date) %>%
+  ungroup() %>%
+  group_by(mhw) %>%
+  mutate(x_axis = as.POSIXct(ifelse(mhw == "during", "2023-10-15", "2024-01-15")),
+         y_axis = rep(seq(from = 0.2, to = 0.5, length.out = 5), length.out = n())) %>%
+  ungroup() %>%
+  select(-mhw)
 
-Acf(diff_series_seasonal, main = "Seasonal ACF of Differenced Series")
-Pacf(diff_series_seasonal, main = "Seasonal PACF of Differenced Series")
+# Join regression equations back to the original data
+all_size_reg <- all_size %>%
+  left_join(models, by = c("treatment", "genet"))
+
+ggplot(all_size_reg) +
+  geom_point(aes(x=date, y=avg_size_diff, color=genet), alpha=0.3) +
+  geom_smooth(aes(x=date, y=avg_size_diff, color=genet ,linetype = mhw), method="lm") +
+  facet_wrap(~treatment) +
+  geom_label_repel(data = models, aes(x=x_axis, y=y_axis, label = equation, color = genet), size = 3) +
+  labs(x = "Date",
+       y = "Differenced average body size (mm)") +
+  theme_bw()
+
+#ggsave(here("experiment", "figures", "body_size_regression.png"), width=15, height=7)
 ```
-According to ChatGPT:
-*Strong Peak at Lag 5 in ACF:*
-The significant negative peak at lag 5 in the ACF suggests a strong seasonal effect with a period of 5 time units. This indicates that the data has a seasonal pattern with a period of 5 lags.
-
-*Wave Pattern in ACF:*
-The wave-like pattern with small positive and negative values elsewhere suggests that the seasonality is prominent at lag 5, but the data beyond this lag doesn’t exhibit strong autocorrelation. This is typical in many time series where the primary seasonality is evident at specific lags, and other autocorrelations diminish.
-
-*Strong Peak at Lag 5 in PACF:*
-A strong peak at lag 5 in the PACF suggests that there is a significant seasonal autoregressive (AR) component. This means that past values separated by a season (5 lags in your case) have a strong influence on the current value.
-
-*Wave Pattern in PACF:*
-The wave-like pattern with small values elsewhere in the PACF indicates that the influence of past values diminishes quickly after lag 5, reinforcing the idea that lag 5 is the primary seasonal effect.
-
-**Determining Seasonal AR and MA Orders**
-*Seasonal AR (PP):*
-Since the PACF shows a strong peak at lag 5 and then cuts off or shows a diminishing pattern, it indicates a seasonal AR component. You might start with P=1 or P=2, but the specific choice will depend on how well it fits the data. In this case, P could be 1 if the PACF cuts off or diminishes significantly after lag 5.
-
-*Seasonal MA (QQ):*
-The ACF shows a strong peak at lag 5 and then diminishes. This suggests that a seasonal MA component is appropriate. Typically, Q=1 is a good starting point, but it can be adjusted based on model performance.
-
-*Seasonal Differencing (DD):*
-If the seasonal pattern persists despite differencing, you might need to include seasonal differencing (DD). Since your ACF and PACF both show strong patterns at lag 5, D=1 is likely appropriate to handle seasonal trends.
-
+### Run ADF and KPSS tests on first and second differenced data
 ```{r}
-fit_auto <- auto.arima(all_transform$avg_size_log, seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
-summary(fit_auto)
-residuals_auto <- residuals(fit_auto)
+# List to store results
+adf_results <- list()
+
+# Loop through each group
+for (group in unique(all_size$treatment)) {
+  group_data <- all_size %>%
+    filter(treatment == group,
+           !is.na(avg_size_diff2)) %>%
+    pull(avg_size_diff2)
+  # Perform the ADF test
+  adf_test <- adf.test(group_data, alternative = "stationary")
+  # Store the result
+  adf_results[[group]] <- adf_test
+}
+
+# Print results
+adf_results
+
+# List to store results
+kpss_results <- list()
+# Loop through each group
+for (group in unique(all_size$treatment)) {
+  group_data <- all_size %>%
+    filter(treatment == group,
+           !is.na(avg_size_diff2)) %>%
+    pull(avg_size_diff2)
+  # Perform the KPSS test
+  kpss_test <- ur.kpss(group_data, type = "mu")  # Use "tau" if you expect trend stationarity
+  # Store the result
+  kpss_results[[group]] <- summary(kpss_test)
+}
+
+# Print results
+kpss_results
+```
+Both p-value is less than 0.01 and test statistic is lower than critical values, so second-order differenced data is now almost certainly stationary. First-order differencing only showed strong evidence for stationarity with the ADF test.
+
+### Plot ACF and PACF for the log-transformed body size data
+```{r}
+Acf(all_size$avg_size_log, main = "ACF of Log-transformed Series")
+Pacf(all_size$avg_size_log, main = "PACF of Log-transformed Series")
+
+Acf(all_size$avg_size_diff, main = "ACF of Differenced Series")
+Pacf(all_size$avg_size_diff, main = "PACF of Differenced Series")
+
+Acf(all_size$avg_size_diff2, main = "ACF of 2-Differenced Series")
+Pacf(all_size$avg_size_diff2, main = "PACF of 2-Differenced Series")
+```
+There is definitely a lot of autocorrelation with the data, for both 1-diff and 2-diff. Makes sense because body size should be highly correlated over time...
+
+### Remove NA values and convert factors to numeric
+```{r}
+all_size_na <- all_size %>%
+  filter(!is.na(avg_size_diff)) %>%
+  mutate(genet = as.numeric(genet),
+         treatment = as.numeric(treatment),
+         mhw = as.numeric(mhw)) %>%
+  select(date, tank, genet, n, treatment, mhw, avg_size, avg_size_log, avg_size_diff, avg_size_diff2)
+```
+
+### Auto ARIMA - basic
+```{r}
+autoArima <- auto.arima(all_size_na$avg_size_diff, seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
+summary(autoArima)
+```
+I ran this all again with second-differenced data, and the model doesn't appear significantly better (in some cases like BIC, not better) and so it doesn't justify the added complexity of a second-differenced model. so let's stick with first-differenced model.
+
+### Check model residuals
+```{r}
+residuals_auto <- residuals(autoArima)
 plot(residuals_auto, main = "Residuals of AUTOSARIMA Model")
 Acf(residuals_auto, main = "ACF of Residuals")
 Box.test(residuals_auto, type = "Ljung-Box")
-```
 
+adf_test_residuals <- adf.test(residuals_auto, alternative = "stationary") #definitely stationary
+qqnorm(residuals_auto)
+qqline(residuals_auto)
+shapiro.test(residuals_auto)
+
+ggplot() +
+  geom_histogram(aes(x = residuals_auto), bins = 20, color = "black") +
+  labs(x = "Residuals",
+       y = "Frequency")
+
+fitted_values <- fitted(autoArima)
+plot(fitted_values, residuals_auto, main="Residuals vs Fitted Values")
+abline(h=0, col="red")
+```
+2-order differencing is not significantly better than 1-order differencing so let's stick with 1-order. 
+
+AR(1) model: This is autoregressive data, and the current value of the time series depends linearly on its immediately preceding value - makes sense because body size shouldn't change that drastically week by week. 
+I(1): First-order differencing applied to make the series stationary - which makes sense because preliminary analyses showed slope of zero with second-differenced data. 
+MA(2): current value of the time series depends on the last two periods’ forecast errors - means that the current value of the series depends on the errors made in the previous two periods, which doesn't make a ton of intuitive sense except maybe if there are big changes to body size (i.e. reproduction?) that just means we won't see those changes finish until 2 weeks later? <<< CHECK THIS LOGIC.
+
+### Check ts trends/seasonality
+```{r}
+all_size_ts <- ts(all_size_na$avg_size_diff, frequency = 52) #weekly data as ts object
+class(all_size_ts)
+summary(all_size_ts)
+acf(all_size_ts)
+pacf(all_size_ts)
+
+decomposition <- stl(all_size_ts, s.window = "periodic")
+plot(decomposition)
+```
+There's no apparent seasonality and a slight positive trend in the data
+
+### Fit ARIMA with different MA values
 ```{r}
 # Fit ARIMA with different seasonal orders
-model1 <- Arima(all_transform$avg_size_log, order = c(5, 1, 1), seasonal = list(order = c(1, 1, 1), period = 5))
-model3 <- Arima(all_transform$avg_size_log, order = c(5, 1, 1), seasonal = list(order = c(1, 1, 1), period = 5))
+model1 <- Arima(all_size_na$avg_size_diff, order = c(1, 1, 1))
+model2 <- Arima(all_size_na$avg_size_diff, order = c(1, 1, 2))
+model3 <- Arima(all_size_na$avg_size_diff, order = c(1, 1, 3))
 
 Acf(residuals(model1), main = paste("ACF of Residuals model1"))
 Pacf(residuals(model1), main = paste("PACF of Residuals model1"))
@@ -370,64 +472,81 @@ Box.test(residuals(model1), lag = 20, type = "Ljung-Box")
 Box.test(residuals(model2), lag = 20, type = "Ljung-Box")
 Box.test(residuals(model3), lag = 20, type = "Ljung-Box")
 ```
+MA(2) is definitely the best fit. 
 
+### Consider potential covariates
 ```{r}
-# Fit the model
-fit <- Arima(all_transform$avg_size_log, order = c(5, 1, 1), seasonal = list(order = c(1, 1, 1), period = 5))
+#create matrix of dummy variables incorporating all potential covariates
+xreg_All <- model.matrix(~ treatment + genet + mhw - 1, data = all_size_na)
+xreg_NoGenet <- model.matrix(~ treatment + mhw - 1, data = all_size_na)
+xreg_MHW <- model.matrix(~ mhw - 1, data = all_size_na)
+xreg_Treatment <- model.matrix(~ treatment - 1, data = all_size_na)
 
-# Residuals and Diagnostics
-plot(residuals_fit, main = "Residuals")
-Acf(residuals_fit, main = "ACF of Residuals")
-Pacf(residuals_fit, main = "PACF of Residuals")
-qqnorm(residuals_fit, main = "QQ Plot of Residuals")
-qqline(residuals_fit)
+arima_covariates_all <- Arima(all_size_na$avg_size_diff, order = c(1, 1, 2), xreg = xreg_All)
+summary(arima_covariates_all)
+
+arima_covariates_noGenet <- Arima(all_size_na$avg_size_diff, order = c(1, 1, 2), xreg = xreg_NoGenet)
+summary(arima_covariates_noGenet)
+
+arima_covariates_mhw <- Arima(all_size_na$avg_size_diff, order = c(1, 1, 2), xreg = xreg_MHW)
+summary(arima_covariates_mhw)
+
+arima_covariates_treatment <- Arima(all_size_na$avg_size_diff, order = c(1, 1, 2), xreg = xreg_Treatment)
+summary(arima_covariates_treatment)
 ```
+Looks like genet is not a significant covariate, but treatment and during/after MHW are slightly impactful. <<< DISCUSS WITH CHRIS.
 
+#### 
+Basic ARIMA(1,1,2): 
+Coefficients:
+         ar1      ma1     ma2
+      0.7682  -1.5296  0.5354
+s.e.  0.0518   0.0662  0.0646
 
+sigma^2 = 0.002058:  log likelihood = 2258.51
+AIC=-4509.02   AICc=-4508.99   BIC=-4488.19
 
+                      ME       RMSE        MAE MPE MAPE      MASE         ACF1
+Training set 0.001281871 0.04529954 0.03479757 Inf  Inf 0.7851294 -0.009148644
+
+####
+####
+ARIMA(1,1,2) with MHW/Treatment covariates:
+Coefficients:
+         ar1      ma1     ma2  treatment     mhw
+      0.7661  -1.5293  0.5351    -0.0029  0.0012
+s.e.  0.0539   0.0682  0.0662     0.0025  0.0155
+
+sigma^2 = 0.002059:  log likelihood = 2259.17
+AIC=-4506.35   AICc=-4506.28   BIC=-4475.1
+
+                      ME       RMSE        MAE MPE MAPE      MASE         ACF1
+Training set 0.001324029 0.04527702 0.03477904 NaN  Inf 0.7847113 -0.008522662
+####
+
+### Check model residuals for MHW/Treatment ARIMA
 ```{r}
-fit_auto <- auto.arima(all_transform$avg_size_log, seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
-summary(fit_auto)
-residuals_auto <- residuals(fit_auto)
+residuals_auto <- residuals(arima_covariates_noGenet)
 plot(residuals_auto, main = "Residuals of AUTOSARIMA Model")
 Acf(residuals_auto, main = "ACF of Residuals")
 Box.test(residuals_auto, type = "Ljung-Box")
+
+adf_test_residuals <- adf.test(residuals_auto, alternative = "stationary") #definitely stationary
+qqnorm(residuals_auto)
+qqline(residuals_auto)
+shapiro.test(residuals_auto)
+
+ggplot() +
+  geom_histogram(aes(x = residuals_auto), bins = 20, color = "black") +
+  labs(x = "Residuals",
+       y = "Frequency")
+
+fitted_values <- fitted(arima_covariates_noGenet)
+plot(fitted_values, residuals_auto, main="Residuals vs Fitted Values")
+abline(h=0, col="red")
 ```
 
 ```{r}
-# Fit SARIMA model
-fit_sarima <- arima(all_transform$avg_size_log,
-                     order = c(2, 1, 1),            # Non-seasonal orders (p, d, q)
-                     seasonal = list(order = c(1, 1, 1), period = 5)) # (P, D, Q)
-summary(fit_sarima)
-residuals_sarima <- residuals(fit_sarima)
-plot(residuals_sarima, main = "Residuals of SARIMA Model") + abline(h = 0, col = "red", lty = 2)
-Acf(residuals_sarima, main = "ACF of Residuals")
-Pacf(residuals_sarima, main = "PACF of Residuals")
-Box.test(residuals_sarima, type = "Ljung-Box")
-```
-
-
-```{r}
-# Fit an ARIMA model for each treatment and color
-# Create a function to fit ARIMA model for each subset of data
-fit_arima <- function(all_transform) {
-  # Fit ARIMA model on the log-transformed body size
-  arima_model <- Arima(all_transform$avg_size_log, order = c(5, 1, 1), seasonal = list(order = c(1, 1, 1), period = 5))
-  return(arima_model)
-}
-
-# Apply the function to each combination of treatment and color
-models <- all_transform %>%
-  group_by(treatment, genet, mhw) %>%
-  group_modify(~ {
-    model <- fit_arima(.x)
-    tibble(model = list(model))
-  })
-
-# Check the fitted models
-models
-
 # To predict future values, use the fitted model on new data
 # Example for one combination of treatment and color
 example_model <- models$model[1]
