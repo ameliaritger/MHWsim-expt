@@ -59,5 +59,5 @@ body_size <- all_data %>%
             samplers=n_distinct(sampler)) %>%
   ungroup()
 
-#remove everything from environment except data_clean
+#remove everything from environment except cleaned data
 rm(list=ls()[!ls() %in% "body_size"])
