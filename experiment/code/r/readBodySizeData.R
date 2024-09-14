@@ -4,7 +4,7 @@ library(tidyverse)
 library(janitor)
 
 # read in .xslx files
-rm(list=ls()) #start with a clean environment
+rm(list=ls()[!ls() %in% "rpi_temp"])
 
 pathname <- here("experiment", "data", "bodySize")
 file_names <- list.files(path = pathname, 
@@ -47,7 +47,7 @@ body_size <- all_data %>%
          date=date_photo,
          #mhw = factor(case_when(date < ymd("2023-12-12") ~ "during", TRUE ~ "after"),
         #              levels = c("during", "after")),
-         ww_g = 0.0975+3.02*avg_diameter_mm+1.08*avg_diameter_mm^2) %>% #calculate wet weight in grams, equation from 2019/2020 Corynactis body size measurements
+         ww_g = 0.0432-0.0208*avg_diameter_mm+0.00343*avg_diameter_mm^2) %>% #calculate wet weight in grams, equation from 2019/2020 Corynactis body size measurements
   select(sampler, date, tank, genet, basal_disk_diameter_mm_a, basal_disk_diameter_mm_b, avg_diameter_mm, ww_g, flag) %>%
   filter(avg_diameter_mm > 1) %>%
   group_by(genet, tank, date) %>%
@@ -60,4 +60,4 @@ body_size <- all_data %>%
   ungroup()
 
 #remove everything from environment except cleaned data
-rm(list=ls()[!ls() %in% "body_size"])
+rm(list=ls()[!ls() %in% c("rpi_temp", "body_size")])
