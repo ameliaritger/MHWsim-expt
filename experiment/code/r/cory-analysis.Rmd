@@ -22,9 +22,17 @@ library(broom) #tidy()
 library(gridExtra) #grid.arrange()
 ```
 
+# Run this ONE TIME to load temperature data, then save the file to your local machine
+```{r}
+source("readRPiData.R", local = knitr::knit_global())
+```
+
 # Load Tidied Data
 ```{r, include = FALSE}
 source("mergeAllData.R", local = knitr::knit_global())
+
+#Load temperature data AFTER you have run source(ReadRPiData)
+rpi_temp <- read_csv(here("experiment", "data", "rpi_temp.csv"))
 ```
 
 # Visualize the data
