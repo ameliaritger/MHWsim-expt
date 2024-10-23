@@ -70,6 +70,13 @@ chill = c("x28_00000eb5045f","x28_00000eb3fd89","x28_00000eb42add","x28_00000eb5
 severe = c("x28_00000eb50e10","x28_00000eb501b0", "x28_00000eb496d2", "x28_00000eb3cf7d", "x28_00000eb52c32")
 extreme = c("x28_00000ec23ab6","x28_00000ec25534","x28_00000eb4b7e0", "x28_00000ec24f93", "x28_00000eb4619b")
 
+sensors <- data.frame(
+  tank = c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15),
+  sensor = c("x28_00000eb4cb62","x28_00000eb51050","x28_00000eb42add","x28_00000eb3fd89","x28_00000eb5045f",
+             "x28_00000eb52c32", "x28_00000eb3cf7d", "x28_00000eb501b0", "x28_00000eb50e10","x28_00000eb496d2",
+             "x28_00000eb4619b","x28_00000eb4b7e0","x28_00000ec24f93","x28_00000ec25534","x28_00000ec23ab6")
+)
+
 temp_clean <- temp_all %>%
   select(1:7, 8:25) %>%
   mutate(timestamp = ymd_hms(timestamp),
@@ -86,7 +93,8 @@ temp_clean <- temp_all %>%
     sensor %in% extreme ~ "extreme",
     TRUE ~ "unknown"
   ),
-    treatment = factor(treatment, levels = c("chill", "severe", "extreme")))
+    treatment = factor(treatment, levels = c("chill", "severe", "extreme"))) %>%
+  merge(sensors, by = "sensor") #merge with sensors
 
 plot_set <- ggplot(temp_clean, aes(x=timestamp)) +
   geom_line(aes(y=chill_set, color="chill_set")) +
@@ -135,3 +143,42 @@ ggarrange(plot_set, plot_avg, ncol = 1)
 
 #ggsave(here("experiment", "figures", "avg_tank_temp_stacked.png"), width=12, height=9)
 ```
+
+# Extract weekly average temperature for each tank
+```{r}
+start_date <- as.Date("2023-10-06")
+fridays <- seq(from = start_date, to = as.Date("2024-02-21"), by = "week")
+date_ranges <- data.frame(
+  friday = fridays,
+  start_date = fridays - 6,  # Saturday
+  end_date = fridays          # Friday
+)
+
+#add a row to the dataframe 
+#temp_sum <- rbind(temp_sum, data.frame(sensor = "x28_00000eb4cb62", tank = 1, timestamp = as.POSIXct("2023-12-28 12:01:10"), temperature = 1000, date = as.Date("2023-12-28"), chill_set=14.75, severe_set=14.75, extreme_set=14.75, treatment="chill"))
+
+temp_sum <- temp_clean %>%
+  arrange(timestamp, tank) %>%
+  mutate(date = as.Date(timestamp)) %>%
+  filter(date >= min(date_ranges$start_date) & date <= max(date_ranges$end_date)) %>%
+  left_join(date_ranges, by = character()) %>%
+  filter(date >= start_date & date <= end_date) %>%
+  group_by(tank, treatment, friday) %>%
+  summarize(avg_temp = mean(temperature, na.rm = TRUE), 
+            min_temp = min(temperature, na.rm = TRUE),
+            max_temp = max(temperature, na.rm = TRUE),
+            .groups = 'drop')
+
+#plot the temperatures for each tank
+ggplot(temp_sum, aes(x = friday, y = avg_temp, color = as.factor(tank))) +
+  geom_line() +
+  geom_point() +
+  #scale_color_manual(values = c("1" = "#0072B2", "2" = "#D55E00", "3" = "#009E73")) +
+  labs(x = "Date",
+       y = "Temperature") +
+  theme_minimal()
+
+#export temp_sum as .csv file
+#write_csv(temp_sum, here("experiment", "data", "weekly_temperature.csv"))
+```
+
