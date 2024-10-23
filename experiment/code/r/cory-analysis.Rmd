@@ -33,6 +33,7 @@ source("mergeAllData.R", local = knitr::knit_global())
 
 #Load temperature data AFTER you have run source(ReadRPiData)
 rpi_temp <- read_csv(here("experiment", "data", "rpi_temp.csv"))
+weekly_temp <- read_csv(here("experiment", "data", "weekly_temperature.csv"))
 ```
 
 # Visualize the data
