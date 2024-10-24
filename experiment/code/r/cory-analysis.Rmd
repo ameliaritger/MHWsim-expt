@@ -20,6 +20,7 @@ library(forecast) #ts()
 library(ggrepel) #geom_text_repel
 library(broom) #tidy()
 library(gridExtra) #grid.arrange()
+library(MARSS)
 ```
 
 # Run this ONE TIME to load temperature data, then save the file to your local machine
@@ -34,6 +35,17 @@ source("mergeAllData.R", local = knitr::knit_global())
 #Load temperature data AFTER you have run source(ReadRPiData)
 rpi_temp <- read_csv(here("experiment", "data", "rpi_temp.csv"))
 weekly_temp <- read_csv(here("experiment", "data", "weekly_temperature.csv"))
+```
+
+## Create tidied df
+```{r}
+all_size <- all %>%
+  filter(!is.na(avg_size)) %>%
+  mutate(avg_size_log = log(avg_size)) %>%
+  group_by(tank, genet) %>%
+  mutate(avg_size_diff = avg_size_log - lag(avg_size_log),
+         avg_size_diff2 = avg_size_diff - lag(avg_size_diff)) %>%
+  ungroup()
 ```
 
 # Visualize the data
@@ -287,10 +299,6 @@ https://stats.stackexchange.com/questions/32634/difference-time-series-before-ar
 
 ### Log transform data
 ```{r}
-all_size <- all %>%
-  filter(!is.na(avg_size)) %>%
-  mutate(avg_size_log = log(avg_size))
-
 # scatter plot of transformed data
 ggplot(all_size, aes(x=date, y=avg_size_log)) +
   geom_point(aes(color=treatment)) +
@@ -313,11 +321,6 @@ It's not perfectly normal but definitely better log-transformed. Looks a bit lik
 
 ### Difference to make the data stationary
 ```{r}
-all_size <- all_size %>%
-  group_by(tank, genet) %>%
-  mutate(avg_size_diff = avg_size_log - lag(avg_size_log),
-         avg_size_diff2 = avg_size_diff - lag(avg_size_diff)) #need second order differencing for slope=0
-
 ggplot(all_size, aes(x=date)) +
   geom_point(aes(y=avg_size_diff), color="black", alpha=0.3) +
   geom_point(aes(y=avg_size_diff2), color="blue", alpha=0.3) +
@@ -795,7 +798,280 @@ plot(future_predictions)
 ## Body size data - MARSS, what we should have been doing all along...
 https://atsa-es.github.io/MARSS/
 
+### Prep data for MARSS model
 ```{r}
-all_size_marss <- all_size
+start_date <- min(weekly_temp$friday)
+
+all_size_marss <- all %>%
+  filter(!is.na(avg_size)) %>%
+  mutate(week = as.numeric(difftime(date, start_date, units = "weeks")) + 1,
+         avg_size_log = log(avg_size),
+         sd_size_log = log(sd_size),
+         tank = as.numeric(tank)) %>%
+  select(date, week, tank, mhw, genet, avg_size_log) %>%
+  left_join(weekly_temp, by = c("date" = "friday", "tank"))
+
+marss_data <- all_size_marss %>%
+  mutate(genet_tank = paste(genet, tank, sep = "_"))
+
+marss_date_wide <- marss_data %>%
+  select(-date, -tank, -genet, -mhw, -treatment, -avg_temp, -min_temp, -max_temp) %>%
+  pivot_wider(names_from = genet_tank, values_from = avg_size_log) %>%
+  column_to_rownames(var = "week") %>%
+  as.matrix() %>%
+  t()
+
+marss_data_trimmed <- marss_date_wide[1:(nrow(marss_date_wide) - 50), 1:(ncol(marss_date_wide) - 6)]
+
+#create temperature matrix as covariate
+temp_covariate <- marss_data %>%
+  select(week, avg_temp, genet_tank) %>%
+  pivot_wider(names_from = genet_tank, values_from = avg_temp) %>%
+  column_to_rownames(var = "week") %>%
+  as.matrix() %>%
+  t()
 ```
+
+### Fit MARSS model
+```{r}
+model_list1 <- list(
+  B = "identity",
+  U = "unequal",
+  Q = "diagonal and equal",
+  Z = "identity",
+  A = "scaling",
+  R = "diagonal and equal"
+)
+fit1 <- MARSS(marss_date_wide, model=model_list1, method="BFGS")
+tidy(fit1)
+autoplot(fit1)
+
+model_list2 <- list(
+  B = "identity",
+  U = "unequal",
+  Q = "diagonal and equal",
+  Z = "identity",
+  A = "scaling",
+  R = "diagonal and equal",
+  C = "unconstrained",
+  c = temp_covariate
+)
+fit2 <- MARSS(marss_date_wide, model=model_list2, method="BFGS")
+tidy(fit2)
+autoplot(fit2)
+
+model_list3 <- list(
+  B = "identity", # State transition; "identity" because body size is autocorrelated
+  U = "unequal", # "unequal" because expect different genets/treatments respond differently to external factors
+  Q = "diagonal and unequal", # Process noise; expect variability in body size differs between genets
+  Z = "identity", # Measurement matrix; measuring body size directly without transformation
+  A = "scaling", # Initial states; not "zero" because initial body size differed between genets
+  R = "diagonal and equal", # Observation noise; expect measurement error would not change between genets
+  C = "unconstrained",
+  c = temp_covariate
+)
+fit3 <- MARSS(marss_date_wide, model=model_list3, method="BFGS")
+tidy(fit3)
+autoplot(fit3)
+
+c(AIC(fit1), AIC(fit2), AIC(fit3))
+```
+
+## Let's move on to much simpler models - from ATSA plankton data
+```{r}
+#Observation error only model
+Q <- U <- x0 <- "zero"
+B <- Z <- "identity"
+A <- "zero"
+D <- "unconstrained"
+model.list1 <- list(B = B, U = U, Q = Q, Z = Z, A = A, D = D, 
+    d = temp_covariate, x0 = x0)
+kem1 <- MARSS(marss_date_wide, model = model.list1)
+
+#Process error only model
+R <- A <- U <- "zero"
+B <- Z <- "identity"
+Q <- "equalvarcov"
+C <- "unconstrained"
+model.list2 <- list(B = B, U = U, Q = Q, Z = Z, A = A, R = R, 
+    C = C, c = temp_covariate)
+kem2 <- MARSS(marss_date_wide, model = model.list2)
+
+#Process and Observation error model
+D <- R <- d <- A <- U <- "zero"
+Z <- "identity"
+B <- "diagonal and unequal"
+Q <- "equalvarcov"
+C <- "unconstrained"
+c <- covariates
+x0 <- "unequal"
+tinitx <- 1
+model.list3 <- list(B = B, U = U, Q = Q, Z = Z, A = A, R = R, 
+    D = D, d = d, C = C, c = c, x0 = x0, tinitx = tinitx)
+kem3 <- MARSS(marss_date_wide, model = model.list3)
+```
+
+
+# harbor seal data
+```{r}
+data(harborSealWA, package = "MARSS")
+dat <- MARSS::harborSealWA
+years <- dat[, "Year"]
+dat <- dat[, !(colnames(dat) %in% c("Year", "HC"))]
+dat <- t(dat)  # transpose to have years across columns
+colnames(dat) <- years
+n <- nrow(dat) - 1
+
+mod.list.0 <- list(B = matrix(1), U = matrix("u"), Q = matrix("q"), 
+                   Z = matrix(1, 4, 1), A = "scaling", R = "diagonal and unequal", 
+                   x0 = matrix("mu"), tinitx = 0)
+fit.0 <- MARSS(dat, model = mod.list.0)
+autoplot(fit.0)
+
+mod.list.1 <- list(B = matrix(1), U = matrix("u"), Q = matrix("q"), 
+                   Z = matrix(1, 4, 1), A = "scaling", R = "diagonal and equal", 
+                   x0 = matrix("mu"), tinitx = 0)
+fit.1 <- MARSS(dat, model = mod.list.1)
+# more supported
+c(AIC(fit.0), AIC(fit.1))
+
+# Q2. Change to observation errors R="unconstrained" What does that mean? Are the errors correlated across sites? Why might that happen?
+mod.list.2 <- list(B = matrix(1), U = matrix("u"), Q = matrix("q"), 
+                   Z = matrix(1, 4, 1), A = "scaling", R = "unconstrained", 
+                   x0 = matrix("mu"), tinitx = 0)
+fit.2 <- MARSS(dat, model = mod.list.2)
+# less supported
+c(AIC(fit.0), AIC(fit.1), AIC(fit.2))
+# Means that the observation variances are correlated across sites
+
+# Q3. Look at the observation variance and correlation matrix
+M=coef(fit.2, type="matrix")$R # Variance matrix
+cov2cor(M) # Correlation matrix
+# Some of the errors seem to be correlated across sites, some positive, some negative
+
+# Task Group 2
+# https://nwfsc-timeseries.github.io/atsa-labs/sec-mss-segind.html
+# Fit a model with four underlying state (population process)
+mod.list.1 <- list(B = diag(1,4), U = matrix("u",4,1), Q = "diagonal and equal", 
+                   Z = diag(1,4), A = "scaling", R = "diagonal and unequal", 
+                   x0 = "unequal", tinitx = 0)
+fit.1 <- MARSS(dat, model = mod.list.1)
+# Q1. Look at the plots
+autoplot(fit.1)
+
+# Plot 2. States - That's the population estimate
+# Q2. In the model you fit, are the 4 state processes (the lines) correlated with each other? Just based on the model you fit? Think about Q.
+
+# No, not correlated. A good year in subpop 1 does not imply a good year in subpop 2.
+
+# Q3. What does this model say about the observation variances? Same, different?
+
+# Different levels of variance and independent errors.
+
+# Q4. Are we assuming that good years are correlated across sites or uncorrelated?
+
+# uncorrelated.
+
+# Task Group 3
+# https://nwfsc-timeseries.github.io/atsa-labs/sec-mss-segind.html
+# Fit a model with four underlying state (population process)
+mod.list.2 <- list(B = diag(1,4), U = matrix("u",4,1), Q = "equalvarcov", 
+                   Z = diag(1,4), A = "scaling", R = "diagonal and equal", 
+                   x0 = "unequal", tinitx = 0)
+fit.2 <- MARSS(dat, model = mod.list.2)
+# Q1. Look at the plots
+autoplot(fit.2)
+
+# Plot 2. States - That's the population estimate
+# Q2. In the model you specified, is the variability in the 4 state processes (the lines) correlated with each other? Think about Q.
+
+# Correlated but with the same variance. A good year in subpop 1 does not imply a good year in subpop 2.
+
+#Q.diag      0.01218
+#Q.offdiag   0.00983
+
+#So pretty highly correlated.
+
+
+# Q3. Compare to a model with Q="diagonal and equal" and R="equalvarcov". Which one fits the data better based on AICc?
+mod.list.3 <- list(B = diag(1,4), U = matrix("u",4,1), Q = "diagonal and equal", 
+                   Z = diag(1,4), A = "scaling", R = "equalvarcov", 
+                   x0 = "unequal", tinitx = 0)
+fit.3 <- MARSS(dat, model = mod.list.3)
+# The model with R="equalvarcov" is less supported
+c(AIC(fit.2), AIC(fit.3))
+
+```
+
+# fish spawn data
+```{r}
+install.packages("rCAX")
+library(rCAX)
+f <- list(nmfs_popid=7)
+tab <- rcax_hli("NOSA")
+
+columbia.river <- tab %>%
+  filter(esu_dps %in% c("Steelhead (Middle Columbia River DPS)","Steelhead (Upper Columbia River DPS)","Steelhead (Lower Columbia River DPS)","Salmon, coho (Lower Columbia River ESU)","Salmon, Chinook (Lower Columbia River ESU)")) %>%
+  select(species, esu_dps, majorpopgroup, esapopname, commonpopname, run, spawningyear, nosaij) %>%
+  rename("value" = nosaij) %>%
+  #remove NA values
+  filter(!is.na(value)) %>%
+  mutate(value = as.numeric(value))
+
+esu <- unique(columbia.river$esu_dps)
+colnames(columbia.river)
+esuname <- esu[2]
+dat <- columbia.river %>% 
+  subset(esu_dps == esuname) %>% # get only this ESU
+  mutate(log.spawner = log(value)) %>% # create a column called log.spawner
+  select(esapopname, spawningyear, log.spawner) %>% # get just the columns that I need
+  pivot_wider(names_from = "esapopname", values_from = "log.spawner") %>% 
+  column_to_rownames(var = "spawningyear") %>% # make the years rownames
+  as.matrix() %>% # turn into a matrix with year down the rows
+  t()
+
+dat[is.na(dat)] <- NA
+tmp <- rownames(dat)
+tmp <- stringr::str_replace(tmp, "Steelhead [(]Upper Columbia River DPS[)]", "")
+tmp <- stringr::str_replace(tmp, "River - summer", "")
+tmp <- stringr::str_trim(tmp)
+rownames(dat) <- tmp
+
+
+df <- columbia.river %>% subset(esu_dps %in% c("Steelhead (Lower Columbia River DPS)"))
+ggplot(df, aes(x=spawningyear, y=log(value), color=majorpopgroup)) + 
+  geom_point(size=0.2, na.rm = TRUE) + 
+  theme(strip.text.x = element_text(size = 3)) +
+  theme(axis.text.x = element_text(size = 5, angle = 90)) +
+  facet_wrap(~esapopname)
+  #ggtitle(paste0(esuname, collapse="\n"))
+
+plotesu(esu[3])
+
+cap <- cax()
+datasets <- cap$datasets()
+print(datasets)
+columbia-river <- cap$get("dataset_name")  # Use the correct dataset identifier
+load(file.path("experiment", "data", "draft", "columbia-river.rda"))
+```
+
+# lake plankton data
+```{r}
+data(lakeWAplankton, package = "MARSS")
+# lakeWA
+fulldat <- lakeWAplanktonTrans
+years <- fulldat[, "Year"] >= 1965 & fulldat[, "Year"] < 1975
+dat <- t(fulldat[years, c("Greens", "Bluegreens")])
+covariates <- t(fulldat[years, c("Temp", "TP")])
+
+the.mean <- apply(dat, 1, mean, na.rm = TRUE)
+the.sigma <- sqrt(apply(dat, 1, var, na.rm = TRUE))
+dat <- (dat - the.mean) * (1/the.sigma)
+
+the.mean <- apply(covariates, 1, mean, na.rm = TRUE)
+the.sigma <- sqrt(apply(covariates, 1, var, na.rm = TRUE))
+covariates <- (covariates - the.mean) * (1/the.sigma)
+```
+
+
 
