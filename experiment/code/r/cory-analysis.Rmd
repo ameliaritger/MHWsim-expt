@@ -814,7 +814,7 @@ all_size_marss <- all %>%
 marss_data <- all_size_marss %>%
   mutate(genet_tank = paste(genet, tank, sep = "_"))
 
-marss_date_wide <- marss_data %>%
+marss_data_wide <- marss_data %>%
   select(-date, -tank, -genet, -mhw, -treatment, -avg_temp, -min_temp, -max_temp) %>%
   pivot_wider(names_from = genet_tank, values_from = avg_size_log) %>%
   column_to_rownames(var = "week") %>%
@@ -830,6 +830,9 @@ temp_covariate <- marss_data %>%
   column_to_rownames(var = "week") %>%
   as.matrix() %>%
   t()
+
+temp_covariate_trimmed <- temp_covariate[1:(nrow(temp_covariate) - 50), 1:(ncol(temp_covariate) - 6)]
+
 ```
 
 ### Fit MARSS model
@@ -842,7 +845,7 @@ model_list1 <- list(
   A = "scaling",
   R = "diagonal and equal"
 )
-fit1 <- MARSS(marss_date_wide, model=model_list1, method="BFGS")
+fit1 <- MARSS(marss_data_trimmed, model=model_list1, method="BFGS")
 tidy(fit1)
 autoplot(fit1)
 
@@ -856,7 +859,7 @@ model_list2 <- list(
   C = "unconstrained",
   c = temp_covariate
 )
-fit2 <- MARSS(marss_date_wide, model=model_list2, method="BFGS")
+fit2 <- MARSS(marss_data_wide, model=model_list2, method="BFGS")
 tidy(fit2)
 autoplot(fit2)
 
@@ -870,7 +873,7 @@ model_list3 <- list(
   C = "unconstrained",
   c = temp_covariate
 )
-fit3 <- MARSS(marss_date_wide, model=model_list3, method="BFGS")
+fit3 <- MARSS(marss_data_wide, model=model_list3, method="BFGS")
 tidy(fit3)
 autoplot(fit3)
 
@@ -879,14 +882,24 @@ c(AIC(fit1), AIC(fit2), AIC(fit3))
 
 ## Let's move on to much simpler models - from ATSA plankton data
 ```{r}
+the.mean <- apply(marss_data_trimmed, 1, mean, na.rm = TRUE)
+the.sigma <- sqrt(apply(marss_data_trimmed, 1, var, na.rm = TRUE))
+marss_data_trimmed <- (marss_data_trimmed - the.mean) * (1/the.sigma)
+
+the.mean <- apply(temp_covariate_trimmed, 1, mean, na.rm = TRUE)
+the.sigma <- sqrt(apply(temp_covariate_trimmed, 1, var, na.rm = TRUE))
+temp_covariate_trimmed <- (temp_covariate_trimmed - the.mean) * (1/the.sigma)
+
 #Observation error only model
 Q <- U <- x0 <- "zero"
 B <- Z <- "identity"
+d <- temp_covariate_trimmed
 A <- "zero"
 D <- "unconstrained"
+y <- marss_data_trimmed  # to show relationship between dat & the equation
 model.list1 <- list(B = B, U = U, Q = Q, Z = Z, A = A, D = D, 
-    d = temp_covariate, x0 = x0)
-kem1 <- MARSS(marss_date_wide, model = model.list1)
+    d = d, x0 = x0)
+kem <- MARSS(y, model = model.list1, method="BFGS")
 
 #Process error only model
 R <- A <- U <- "zero"
@@ -894,8 +907,18 @@ B <- Z <- "identity"
 Q <- "equalvarcov"
 C <- "unconstrained"
 model.list2 <- list(B = B, U = U, Q = Q, Z = Z, A = A, R = R, 
-    C = C, c = temp_covariate)
-kem2 <- MARSS(marss_date_wide, model = model.list2)
+    C = C, c = temp_covariate_trimmed)
+kem2 <- MARSS(marss_data_trimmed, model = model.list2, method="BFGS")
+
+R <- A <- U <- "zero"
+B <- Z <- "identity"
+Q <- "equalvarcov"
+C <- "unconstrained"
+c <- temp_covariate_trimmed
+y <- marss_data_trimmed
+model.list2 <- list(B = B, U = U, Q = Q, Z = Z, A = A, R = R, 
+    C = C, c = c)
+kem2 <- MARSS(y, model = model.list2)
 
 #Process and Observation error model
 D <- R <- d <- A <- U <- "zero"
@@ -908,7 +931,128 @@ x0 <- "unequal"
 tinitx <- 1
 model.list3 <- list(B = B, U = U, Q = Q, Z = Z, A = A, R = R, 
     D = D, d = d, C = C, c = c, x0 = x0, tinitx = tinitx)
-kem3 <- MARSS(marss_date_wide, model = model.list3)
+kem3 <- MARSS(marss_data_wide, model = model.list3)
+
+kem_default <- MARSS(marss_data_trimmed)
+kem_bfgs <- MARSS(marss_data_trimmed, method="BFGS")
+#correlated hidden state processes
+kem_unconstrained <- MARSS(marss_data_trimmed, model=list(Q = "unconstrained"), control = list(safe = TRUE, trace=1))
+#equally correlated hidden state processes
+kem_equalvar <- MARSS(marss_data_trimmed, model=list(Q = "equalvarcov"))
+```
+
+
+Monte Carlo parameter estimation
+```{r}
+MARSSmcinit <- function(MLEobj,
+                        control = list(
+                          numInits = 500, numInitSteps = 10,
+                          MCbounds = list(
+                            B = c(0, 1), U = c(-1, 1), Q = c(1, 1),
+                            Z = c(0, 1), A = c(-1, 1), R = c(1, 1), x0 = c(-1, 1)
+                          )
+                        ),
+                        silent = FALSE) {
+  control.default <- list(numInits = 500, numInitSteps = 10, MCbounds = list(B = c(0, 1), U = c(-1, 1), Q = c(1, 1), Z = c(0, 1), A = c(-1, 1), R = c(1, 1), x0 = c(-1, 1)))
+  if (!is.null(control)) {
+    if (!is.list(control)) stop("MARSSmcinit: control must be a list")
+    if (any(!(names(control) %in% names(control.default)))) stop(paste("MARSSmcinit: allowed control list elements are", names(control.default)))
+    control.new <- control.default
+    for (i in names(control)) control.new[[i]] <- control[[i]]
+    control <- control.new
+  }
+  drawProgressBar <- FALSE
+  if (!silent) { # then we can draw a progress bar
+    cat("\n")
+    cat("> Starting Monte Carlo Initializations\n")
+    prev <- MARSS:::progressBar() # this is an internal function to MARSS
+    drawProgressBar <- TRUE
+  }
+  MODELobj <- MLEobj[["marss"]]
+  y <- MODELobj$data
+  par.dims <- attr(MODELobj, "model.dims")
+  m <- par.dims[["x"]][1]
+  n <- par.dims[["y"]][1]
+  TT <- par.dims[["data"]][2]
+  ## YM matrix for handling missing values
+  YM <- matrix(as.numeric(!is.na(y)), n, TT)
+  # Make sure the missing vals in y are zeroed out
+  y[YM == 0] <- 0
+
+  free.tmp <- MODELobj$free
+  dim.tmp <- list(Z = c(n, m), A = c(n, 1), R = c(n, n), B = c(m, m), U = c(m, 1), Q = c(m, m), x0 = c(m, 1))
+  bounds.tmp <- control$MCbounds
+  init <- bestinits <- MLEobj$start
+  bestLL <- -1.0e10
+
+  # loop over numInits: # of random draws of initial values
+  for (loop in 1:control$numInits) {
+    init.loop <- init
+
+    # Draw random values
+    en <- c("Z", "A", "R", "B", "U", "Q", "x0")
+    for (el in en) {
+      dim.param <- dim.tmp[[el]]
+      if (!MARSS:::is.fixed(free.tmp[[el]])) { # is.fixed is a utility func in MARSS
+        bounds.param <- bounds.tmp[[el]]
+        # use the first fixed and free in a temporally varying model; arbitrary
+        tmp <- list(f = MARSS:::sub3D(MODELobj$fixed[[el]], t = 1), D = MARSS:::sub3D(MODELobj$free[[el]], t = 1))
+        if (el %in% c("Q", "R")) { # random starts drawn from a wishart dist
+          if (bounds.param[1] < dim.param[1]) {
+            df <- dim.param[1]
+          } else {
+            df <- bounds.param[1]
+          }
+          S <- diag(bounds.param[2], dim.param[1])
+          # draw a random matrix from wishart
+          tmp.random <- MARSS:::rwishart(df, S) / df
+          # reapply the sharing and fixed constraints
+          par.random <- solve(t(tmp$D) %*% tmp$D) %*% t(tmp$D) %*% (MARSS:::vec(tmp.random) - tmp$f)
+        } else {
+          par.random <- matrix(runif(dim(tmp$D)[2], bounds.param[1], bounds.param[2]), dim(tmp$D)[2], 1)
+          if (el %in% c("B")) {
+            tmp.max <- max(abs(eigen(par.random, only.values = TRUE)$values))
+            # rescale to bring the max abs eigenvalues to between 0 and 1
+            par.random <- par.random / (tmp.max / runif(1, .01, .99))
+          }
+          if (el %in% c("x0")) {
+            x0init <- init$x0 # where the original start is
+            x.lo <- ifelse(x0init > 0, exp(bounds.param[1]) * x0init, exp(bounds.param[2]) * x0init)
+            x.hi <- ifelse(x0init > 0, exp(bounds.param[2]) * x0init, exp(bounds.param[1]) * x0init)
+            par.random <- matrix(runif(dim(tmp$D)[2], x.lo, x.hi), dim(tmp$D)[2], 1)
+          }
+        }
+      } else {
+        par.random <- matrix(0, 0, 1)
+      }
+      init.loop[[el]] <- par.random
+    }
+
+    ## Call MARSSkem() with these inits
+    MLEobj$start <- init.loop
+    MLEobj$control$maxit <- control$numInitSteps
+    MLEobj$control$minit <- 1
+    MLEobj$control$silent <- TRUE # don't output
+    MLEobj <- MARSSkem(MLEobj) # get new fit using this init
+
+    if (drawProgressBar == TRUE) prev <- MARSS:::progressBar(loop / control$numInits, prev)
+
+    ## Check whether the likelihood is the best observed
+    ## Only use bootstrap param draws where loglike did not go down during numInitSteps
+    if (MLEobj$logLik > bestLL) {
+      # update the best initial parameter estimates
+      bestinits <- MLEobj$par
+      bestLL <- MLEobj$logLik
+    }
+  } # end numInits loop
+
+  return(bestinits)
+}
+
+
+fit1 <- MARSS(marss_data_wide)
+MCinits <- MARSSmcinit(fit1, control = list(numInits = 10))
+fit2 <- MARSS(marss_data_wide, inits = MCinits)
 ```
 
 
@@ -921,6 +1065,8 @@ dat <- dat[, !(colnames(dat) %in% c("Year", "HC"))]
 dat <- t(dat)  # transpose to have years across columns
 colnames(dat) <- years
 n <- nrow(dat) - 1
+
+kem <- MARSS(dat)
 
 mod.list.0 <- list(B = matrix(1), U = matrix("u"), Q = matrix("q"), 
                    Z = matrix(1, 4, 1), A = "scaling", R = "diagonal and unequal", 
