@@ -831,6 +831,8 @@ temp_covariate <- marss_data %>%
   as.matrix() %>%
   t()
 
+temp_covariate[duplicated(temp_covariate),]
+
 temp_covariate_trimmed <- temp_covariate[1:(nrow(temp_covariate) - 50), 1:(ncol(temp_covariate) - 6)]
 
 ```
@@ -880,7 +882,7 @@ autoplot(fit3)
 c(AIC(fit1), AIC(fit2), AIC(fit3))
 ```
 
-## Let's move on to much simpler models - from ATSA plankton data
+### Let's move on to much simpler models - from ATSA plankton data
 ```{r}
 the.mean <- apply(marss_data_trimmed, 1, mean, na.rm = TRUE)
 the.sigma <- sqrt(apply(marss_data_trimmed, 1, var, na.rm = TRUE))
@@ -942,7 +944,7 @@ kem_equalvar <- MARSS(marss_data_trimmed, model=list(Q = "equalvarcov"))
 ```
 
 
-Monte Carlo parameter estimation
+### Monte Carlo parameter estimation
 ```{r}
 MARSSmcinit <- function(MLEobj,
                         control = list(
@@ -1053,6 +1055,162 @@ MARSSmcinit <- function(MLEobj,
 fit1 <- MARSS(marss_data_wide)
 MCinits <- MARSSmcinit(fit1, control = list(numInits = 10))
 fit2 <- MARSS(marss_data_wide, inits = MCinits)
+str(MCinits)
+```
+MARSSmcinit suggests 
+- B should be identity but could be diagonal and unequal (unlikely but can try diagonal and equal). 
+        Identity AIC: -4110, AICc -3949, log-likelihood: 2355
+        Diagonal and equal AIC: -4580, AICc -4418, log-likelihood: 2591
+        Diagonal and unequal AIC: 
+- U should be unequal or unconstrained
+- Q should be either diagonal and unequal or unconstrained
+- Z should be identity
+- A should be zero but scalar is possible (but unlikely)
+- R could be anything but Identity (because value is 0.00187)
+        Equalvarcov: measurement error equal but might be different
+        Diag+Equal: Equal variance for all observations but covariance is zero
+        Diag+Unequal: Some measurements might have more error variability than others
+        Unconstranied: Most complex, do this at the very end (and at end of day)
+
+structure of U and Q specify our hypotheses/assumptions about how the environment is shared between populations
+
+## testing basic models and working our way up
+### Basic model
+```{r}
+model_list2 <- list(
+  B = "identity",
+  U = "zero",
+  Q = "identity",
+  Z = "identity",
+  A = "zero",
+  R = "identity"
+)
+fit2 <- MARSS(marss_data_wide, model=model_list2)
+```
+
+### A 
+```{r}
+#genotype_vec <- rep(c("A", "B", "C", "D", "E"), times = 15)
+#AA <- model.matrix(~ (genotype_vec) - 1) 
+#colnames(AA) <- levels(factor(genotype_vec))
+
+# Create the genotype vector
+genotype_vec <- rep(c("A", "B", "C", "D", "E"), times = 15)
+genotype_numeric <- as.numeric(factor(genotype_vec, levels = c("A", "B", "C", "D", "E")))
+A_matrix <- matrix(genotype_numeric, ncol = 1)
+
+model_list4 <- list(
+  B = "identity",
+  U = "zero",
+  Q = "identity",
+  Z = "identity",
+  A = A_matrix,
+  R = "identity"
+)
+fit4 <- MARSS(marss_data_wide, model=model_list4)
+```
+
+### B
+```{r}
+#create unique B matrix where each genet has its own ID
+n_genets <- 5
+n_tanks <- 15
+n_time <- 19
+n_states <- n_genets * n_tanks
+B_matrix <- matrix(0, n_states, n_states)
+for (i in 0:(n_genets - 1)) {
+  start_row <- i * n_tanks + 1
+  end_row <- (i + 1) * n_tanks
+  B_matrix[start_row:end_row, start_row:end_row] <- diag(n_tanks)
+}
+
+model_list5 <- list(
+  B = B_matrix,
+  U = "zero",
+  Q = "identity",
+  Z = "identity",
+  A = A_matrix,
+  R = "identity"
+)
+fit5 <- MARSS(marss_data_wide, model=model_list5)
+
+model_list6 <- list(
+  B = "diagonal and unequal",
+  U = "zero",
+  Q = "identity",
+  Z = "identity",
+  A = A_matrix,
+  R = "identity"
+)
+fit6 <- MARSS(marss_data_wide, model=model_list6)
+
+model_list7 <- list(
+  B = "diagonal and equal",
+  U = "zero",
+  Q = "identity",
+  Z = "identity",
+  A = A_matrix,
+  R = "identity"
+)
+fit7 <- MARSS(marss_data_wide, model=model_list7)
+
+#diagonal and equal fits less good but is way faster to run - by 10+ minutes. need to follow up with biological interpretation since "diagonal and equal" means genet responses to environment is uniform vs. "diagonal and unequal" means each genet responds differently to environment (aka one genet thrives more)
+
+# Fit model with priors
+priors5 <- MARSS(marss_data_wide, model=model_list5,control=list(maxit=100, allow.degen=TRUE, trace=1, safe=TRUE), fit=TRUE)
+fit8 <- MARSS(marss_data_wide, model=model_list5, control=list(maxit = 1000), inits=priors5$par)
+
+#doesn't improve fit BUT it did speed everything up so definitely do this with legit models in the future.
+```
+
+### U
+```{r}
+model_list9 <- list(
+  B = "diagonal and equal",
+  U = "unequal",
+  Q = "identity",
+  Z = "identity",
+  A = A_matrix,
+  R = "identity"
+)
+fit9 <- MARSS(marss_data_wide, model=model_list9)
+#priors9 <- MARSS(marss_data_wide, model=model_list9,control=list(maxit=100, allow.degen=TRUE, trace=1, safe=TRUE), fit=TRUE)
+#fit9prior <- MARSS(marss_data_wide, model=model_list9, control=list(maxit = 1000), inits=priors9$par)
+
+model_list10 <- list(
+  B = "diagonal and equal",
+  U = "unconstrained",
+  Q = "identity",
+  Z = "identity", 
+  A = A_matrix,
+  R = "identity"
+)
+fit10 <- MARSS(marss_data_wide, model=model_list10)
+```
+Unconstrained U was the same model results as unequal U, meaning that process error was UNEQUAL (and not potentially the same, which would have been an option with unconstrained)
+
+### Q
+On FUERTE mac, I ran diagonalxequal, diagonalxunequal, and unconstrained and found that diagonal and equal and unconstrained were better fits (though none converged) and had the same AIC values
+```{r}
+```
+
+### R
+On FUERTE mac, I ran everything except R=identity. Only the two diagonal models converged, and "diagonal and equal" had a slightly better fit. 
+```{r}
+```
+
+## Add tempearture covariate
+```{r}
+# Make C matrix for temperature covariate
+C_matrix <- matrix(0, nrow = 75, ncol = 19)
+
+# Fill the C matrix
+for (time_point in 1:19) {
+  for (genotype in 1:5) {
+    # Each group of 5 genotypes is influenced by the temperature at the given time point
+    C_matrix[(time_point - 1) * 5 + genotype, time_point] <- 1
+  }
+}
 ```
 
 
