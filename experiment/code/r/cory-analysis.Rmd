@@ -13,6 +13,8 @@ library(janitor)
 library(here)
 library(lubridate)
 library(ggpmisc) #statpolyeq ggplot
+library(lme4) #GLMER
+library(MASS) #GLARMA
 library(forecast) #ARIMA
 library(tseries) #ADF test
 library(urca) #KPSS test
@@ -289,9 +291,88 @@ ggplot(all, aes(x=date, y=dying_dead, color = treatment)) +
 # Start running stats
 
 ## Count data - GLARMA 
+
+### Prepare data
+```{r}
+all_count <- all %>%
+  #convert date to a numeric sequence
+  mutate(day_numeric = as.numeric(as.Date(date)-min(as.Date(date))),
+         mhw_binary = as.factor(ifelse(mhw == "during", 0, 1))) %>%
+  dplyr::select(day_numeric, date, tank, genet, treatment, mhw, mhw_binary, n_true, growth_rate, growth_rate_cont) %>%
+  rename(growth_rate_mhw = growth_rate) #relabel for better understanding. growth_rate_mhw is where the growth rate resets to zero when the MHW ends. I believe I won't need growth_rate_mhw for GLARMA model because I can add state as a potential covariate.
+```
+
+### Check distribution
+```{r}
+hist(all_count$growth_rate_cont, breaks = seq(min(all_count$growth_rate_cont), max(all_count$growth_rate_cont) + 0.5, by = 1), 
+     main = "Histogram of Growth Rate", xlab = "Growth Rate", 
+     ylab = "Frequency", col = "lightblue")
+
+hist(all_count$n_true, breaks = seq(min(all_count$n_true), max(all_count$n_true) + 0.5, by = 1), 
+     main = "Histogram of Counts", xlab = "Count", 
+     ylab = "Frequency", col = "lightblue")
+```
+
+```{r}
+# Fit a Poisson model
+poisson_model <- glmer(n_true ~ treatment + day_numeric + (1|tank), family = poisson, data = all_count)
+
+# Fit a Negative Binomial model
+nb_model <- glmer.nb(n_true ~ treatment + day_numeric + (1|tank), data = all_count)
+
+# Compare models
+AIC(poisson_model, nb_model)
+```
+
+### Growth rate: QQ plot, chi square test, overdispersion ratio
+```{r}
+qqnorm(all_count$growth_rate_cont)
+qqline(all_count$growth_rate_cont, col = "red")
+
+# Create a table of observed counts
+observed_counts <- table(all_count$growth_rate_cont)
+# Calculate expected counts based on Poisson distribution
+lambda <- mean(all_count$growth_rate_cont)
+expected_counts <- dpois(as.numeric(names(observed_counts)), lambda) * sum(observed_counts)
+# Perform the Chi-squared test
+chisq.test(observed_counts, p = expected_counts / sum(expected_counts))
+
+# Calculate mean and variance of growth_rate
+mean_growth <- mean(all_count$growth_rate_cont)
+var_growth <- var(all_count$growth_rate_cont)
+# Check ratio
+overdispersion_ratio <- var_growth / mean_growth
+print(overdispersion_ratio) #growth rate is overdispersed
+```
+
+### Growth rate: QQ plot, chi square test, overdispersion ratio
+```{r}
+qqnorm(all_count$n_true)
+qqline(all_count$n_true, col = "red")
+
+# Create a table of observed counts
+observed_counts <- table(all_count$n_true)
+# Calculate expected counts based on Poisson distribution
+lambda <- mean(all_count$n_true)
+expected_counts <- dpois(as.numeric(names(observed_counts)), lambda) * sum(observed_counts)
+# Perform the Chi-squared test
+chisq.test(observed_counts, p = expected_counts / sum(expected_counts))
+
+# Calculate mean and variance of growth_rate
+mean_growth <- mean(all_count$n_true)
+var_growth <- var(all_count$n_true)
+# Check ratio
+overdispersion_ratio <- var_growth / mean_growth
+print(overdispersion_ratio) #growth rate is overdispersed
+```
+
+### Check histogram of count data
 ```{r}
 
 ```
+
+
+
 
 ## Body size data - ARIMA forecasting
 https://stats.stackexchange.com/questions/281666/how-does-acf-pacf-identify-the-order-of-ma-and-ar-terms
@@ -1074,8 +1155,8 @@ MARSSmcinit suggests
 
 structure of U and Q specify our hypotheses/assumptions about how the environment is shared between populations
 
-## testing basic models and working our way up
-### Basic model
+### testing basic models and working our way up
+#### Basic model
 ```{r}
 model_list2 <- list(
   B = "identity",
@@ -1088,7 +1169,7 @@ model_list2 <- list(
 fit2 <- MARSS(marss_data_wide, model=model_list2)
 ```
 
-### A 
+#### A 
 ```{r}
 #genotype_vec <- rep(c("A", "B", "C", "D", "E"), times = 15)
 #AA <- model.matrix(~ (genotype_vec) - 1) 
@@ -1110,7 +1191,7 @@ model_list4 <- list(
 fit4 <- MARSS(marss_data_wide, model=model_list4)
 ```
 
-### B
+#### B
 ```{r}
 #create unique B matrix where each genet has its own ID
 n_genets <- 5
@@ -1163,7 +1244,7 @@ fit8 <- MARSS(marss_data_wide, model=model_list5, control=list(maxit = 1000), in
 #doesn't improve fit BUT it did speed everything up so definitely do this with legit models in the future.
 ```
 
-### U
+#### U
 ```{r}
 model_list9 <- list(
   B = "diagonal and equal",
@@ -1189,17 +1270,17 @@ fit10 <- MARSS(marss_data_wide, model=model_list10)
 ```
 Unconstrained U was the same model results as unequal U, meaning that process error was UNEQUAL (and not potentially the same, which would have been an option with unconstrained)
 
-### Q
+#### Q
 On FUERTE mac, I ran diagonalxequal, diagonalxunequal, and unconstrained and found that diagonal and equal and unconstrained were better fits (though none converged) and had the same AIC values
 ```{r}
 ```
 
-### R
+#### R
 On FUERTE mac, I ran everything except R=identity. Only the two diagonal models converged, and "diagonal and equal" had a slightly better fit. 
 ```{r}
 ```
 
-## Add tempearture covariate
+### Add tempearture covariate
 ```{r}
 # Make C matrix for temperature covariate
 C_matrix <- matrix(0, nrow = 75, ncol = 19)
@@ -1214,7 +1295,7 @@ for (time_point in 1:19) {
 ```
 
 
-# harbor seal data
+### harbor seal data
 ```{r}
 data(harborSealWA, package = "MARSS")
 dat <- MARSS::harborSealWA
@@ -1307,7 +1388,7 @@ c(AIC(fit.2), AIC(fit.3))
 
 ```
 
-# fish spawn data
+### fish spawn data
 ```{r}
 install.packages("rCAX")
 library(rCAX)
@@ -1359,7 +1440,7 @@ columbia-river <- cap$get("dataset_name")  # Use the correct dataset identifier
 load(file.path("experiment", "data", "draft", "columbia-river.rda"))
 ```
 
-# lake plankton data
+### lake plankton data
 ```{r}
 data(lakeWAplankton, package = "MARSS")
 # lakeWA
