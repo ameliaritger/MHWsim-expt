@@ -14,7 +14,10 @@ library(here)
 library(lubridate)
 library(ggpmisc) #statpolyeq ggplot
 library(lme4) #GLMER
-library(MASS) #GLARMA
+library(nlme) #nlme
+library(glmmTMB) #GLMER
+library(glarma)
+#library(MASS) #GLARMA
 library(forecast) #ARIMA
 library(tseries) #ADF test
 library(urca) #KPSS test
@@ -299,30 +302,35 @@ all_count <- all %>%
   mutate(day_numeric = as.numeric(as.Date(date)-min(as.Date(date))),
          mhw_binary = as.factor(ifelse(mhw == "during", 0, 1))) %>%
   dplyr::select(day_numeric, date, tank, genet, treatment, mhw, mhw_binary, n_true, growth_rate, growth_rate_cont) %>%
-  rename(growth_rate_mhw = growth_rate) #relabel for better understanding. growth_rate_mhw is where the growth rate resets to zero when the MHW ends. I believe I won't need growth_rate_mhw for GLARMA model because I can add state as a potential covariate.
+  rename(growth_rate_mhw = growth_rate) %>% #relabel for better understanding. growth_rate_mhw is where the growth rate resets to zero when the MHW ends. I believe I won't need growth_rate_mhw for GLARMA model because I can add state as a potential covariate.
+  mutate(genet_tank = paste(tank, genet, sep = ""), #merge genet and tank because each unique genet x tank value is going to be autocorrelated
+         intercept = 1) # create intercept of 1s for glarma
 ```
 
 ### Check distribution
 ```{r}
-hist(all_count$growth_rate_cont, breaks = seq(min(all_count$growth_rate_cont), max(all_count$growth_rate_cont) + 0.5, by = 1), 
+hist(all_count$growth_rate_cont, breaks = seq(min(all_count$growth_rate_cont), max(all_count$growth_rate_cont) + 0.5, by = 2), 
      main = "Histogram of Growth Rate", xlab = "Growth Rate", 
      ylab = "Frequency", col = "lightblue")
 
-hist(all_count$n_true, breaks = seq(min(all_count$n_true), max(all_count$n_true) + 0.5, by = 1), 
+hist(all_count$n_true, breaks = seq(min(all_count$n_true)-0.5, max(all_count$n_true) + 0.5, by = 2), 
      main = "Histogram of Counts", xlab = "Count", 
      ylab = "Frequency", col = "lightblue")
 ```
 
 ```{r}
 # Fit a Poisson model
-poisson_model <- glmer(n_true ~ treatment + day_numeric + (1|tank), family = poisson, data = all_count)
+poisson_growth <- glmer((growth_rate_cont+4) ~ treatment + day_numeric + (1|tank), family = poisson, data = all_count)
+poisson_n <- glmer(n_true ~ treatment + day_numeric + (1|tank), family = poisson, data = all_count)
 
 # Fit a Negative Binomial model
-nb_model <- glmer.nb(n_true ~ treatment + day_numeric + (1|tank), data = all_count)
+nb_growth <- glmer.nb((growth_rate_cont+4) ~ treatment + day_numeric + (1|tank), data = all_count)
+nb_n <- glmer.nb(n_true ~ treatment + day_numeric + (1|tank), data = all_count)
 
 # Compare models
-AIC(poisson_model, nb_model)
+AIC(poisson_growth, nb_growth, poisson_n, nb_n)
 ```
+NB is a better fit with random Tank effect, but Poisson is better fit with random GenetTank effect
 
 ### Growth rate: QQ plot, chi square test, overdispersion ratio
 ```{r}
@@ -333,19 +341,20 @@ qqline(all_count$growth_rate_cont, col = "red")
 observed_counts <- table(all_count$growth_rate_cont)
 # Calculate expected counts based on Poisson distribution
 lambda <- mean(all_count$growth_rate_cont)
-expected_counts <- dpois(as.numeric(names(observed_counts)), lambda) * sum(observed_counts)
+expected_counts <- dpois(as.numeric(names(observed_counts)), lambda) * length(observed_counts)
 # Perform the Chi-squared test
-chisq.test(observed_counts, p = expected_counts / sum(expected_counts))
+chisq.test(observed_counts, p = expected_counts, rescale.p = TRUE)
 
-# Calculate mean and variance of growth_rate
-mean_growth <- mean(all_count$growth_rate_cont)
-var_growth <- var(all_count$growth_rate_cont)
+growth_mean <- mean(all_count$growth_rate_cont)
+growth_var <- var(all_count$growth_rate_cont)
 # Check ratio
-overdispersion_ratio <- var_growth / mean_growth
+overdispersion_ratio <- growth_var / growth_mean
 print(overdispersion_ratio) #growth rate is overdispersed
+
+shapiro.test(all_count$growth_rate_cont)
 ```
 
-### Growth rate: QQ plot, chi square test, overdispersion ratio
+### Counts: QQ plot, chi square test, overdispersion ratio
 ```{r}
 qqnorm(all_count$n_true)
 qqline(all_count$n_true, col = "red")
@@ -354,23 +363,132 @@ qqline(all_count$n_true, col = "red")
 observed_counts <- table(all_count$n_true)
 # Calculate expected counts based on Poisson distribution
 lambda <- mean(all_count$n_true)
-expected_counts <- dpois(as.numeric(names(observed_counts)), lambda) * sum(observed_counts)
+expected_counts <- dpois(as.numeric(names(observed_counts)), lambda) * length(observed_counts)
 # Perform the Chi-squared test
-chisq.test(observed_counts, p = expected_counts / sum(expected_counts))
+chisq.test(observed_counts, p = expected_counts, rescale.p = TRUE)
 
-# Calculate mean and variance of growth_rate
-mean_growth <- mean(all_count$n_true)
-var_growth <- var(all_count$n_true)
+n_mean <- mean(all_count$n_true)
+n_var <- var(all_count$n_true)
 # Check ratio
-overdispersion_ratio <- var_growth / mean_growth
+overdispersion_ratio <- n_var / n_mean
 print(overdispersion_ratio) #growth rate is overdispersed
+
+shapiro.test(all_count$n_true)
 ```
 
-### Check histogram of count data
+Neither count data nor growth rate appear to follow poisson distribution. And both data metrics are overdispersed (mean << variance), so let's check with negative binomial distribution.
+
+Growth rate contains negative numbers, which complicates the fact that it appears to follow negative binomial distribution. Let's focus on the raw count numbers for now and come back to growth rate later.
+
+Negative binomial distribution?
 ```{r}
+nb_fit <- glmmTMB(n_true ~ time + (1|genet_tank), data = all_count, family = nbinom1)
+summary(nb_fit)
 
+residuals_nb <- residuals(nb_fit)
+fitted_values_nb <- fitted(nb_fit)
+
+glm.nb(n_true ~ 1, data = all_count) %>% 
+  ggplot(aes(.fitted, .resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0)
+
+plot(residuals_nb, fitted_values_nb,
+     xlab = "Fitted Values",
+     ylab = "Residuals",
+     main = "Residuals vs. Fitted Values")
+abline(h = 0, col = "red", lty = 2)
 ```
 
+Let's just jump straight into GLARMA and see what happens
+```{r}
+count_glmm1 <- lme(n_true ~ treatment + genet,
+                   random = ~1|tank,
+                   data = all_count,
+                   correlation = corAR1(form = ~ 1|tank))
+count_glmm2 <- lme(n_true ~ treatment + genet,
+                   random = ~1|genet_tank,
+                   data = all_count,
+                   correlation = corAR1(form = ~ 1|genet_tank))
+AIC(count_glmm1, count_glmm2)
+summary(count_glmm1)
+summary(count_glmm2)
+
+#genet_tank is definitely the correct "random effect" I need to incorporate, especially because it has lower residual standard dev and high autocorrelation (Phi) and MUCH lower AIC
+
+count_glmm3 <- lme(n_true ~ treatment + genet + treatment:genet,
+                   random = ~1|genet_tank,
+                   data = all_count,
+                   correlation = corAR1(form = ~ 1|genet_tank))
+
+AIC(count_glmm2, count_glmm3)
+summary(count_glmm2)
+summary(count_glmm3)
+
+#even with added complexity and higher DF, count_glmm3 has a lower AIC suggesting the interaction improves the model fit significantly enough to outweigh the penalty from model complexity.
+```
+
+
+```{r}
+y <- all_count$n_true %>%
+  as.matrix()
+X <- model.matrix(n_true ~ treatment + genet, data = all_count)
+x <- model.matrix(n_true ~ treatment + genet + treatment:genet, data = all_count)
+
+#equivalent but more wordy
+#all_count_glarma <- all_count %>%
+#  mutate(dummy = 1) %>%
+#  pivot_wider(names_from = treatment, values_from = dummy, values_fill = #list(dummy = 0)) %>%
+#  mutate(dummy = 1) %>%
+#  pivot_wider(names_from = genet, values_from = dummy, values_fill = #list(dummy = 0)) %>%
+#  mutate(dummy = 1) %>%
+#  pivot_wider(names_from = genet_tank, values_from = dummy, values_fill = #list(dummy = 0))
+# x <- all_count_glarma %>%
+#   select(intercept, severe, extreme, B, C, D, E) %>%
+#   as.matrix()
+
+glarma_model <- glarma(y, X, phiLags = c(1), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+glarma_model_int <- glarma(y, x, phiLags = c(1), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+
+summary(glarma_model)
+summary(glarma_model_int)
+#interaction model is better all around - which doesn't deviate from the GLMM
+```
+
+Let's test GLARMA models now with different lags and distributions
+```{r}
+glarma_model_nr <- glarma(y, x, phiLags = c(1), type = "Poi", method = "NR", residuals = "Pearson", maxit = 100, grad = 1e-6)
+summary(glarma_model_nr) #no effect of NR vs FS other than computation time being faster for NR
+glarma_model_nb <- glarma(y, x, phiLags = c(1), type = "NegBin", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6, alphaInit = 0.1)
+#NegBin doesn't run --> WHY?????? My data do not follow poisson
+
+#Let's just keep doing model comparison with different lags I guess...
+glarma_model_2 <- glarma(y, x, phiLags = c(2), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+glarma_model_3 <- glarma(y, x, phiLags = c(3), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+glarma_model_4 <- glarma(y, x, phiLags = c(4), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+glarma_model_5 <- glarma(y, x, phiLags = c(5), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+glarma_model_6 <- glarma(y, x, phiLags = c(6), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+glarma_model_7 <- glarma(y, x, phiLags = c(7), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+glarma_model_1_6 <- glarma(y, x, phiLags = c(1:6), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+
+
+print(c(extractAIC(glarma_model_int), extractAIC(glarma_model_2), extractAIC(glarma_model_3), extractAIC(glarma_model_4), extractAIC(glarma_model_5), extractAIC(glarma_model_6), extractAIC(glarma_model_7)))
+#lag 6 has lowest AIC, lag 5 has second lowest AIC
+summary(glarma_model_int)
+summary(glarma_model_6)
+
+glarma_model_1_6 <- glarma(y, x, phiLags = c(1:6), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+print(c(extractAIC(glarma_model_int), extractAIC(glarma_model_6), extractAIC(glarma_model_1_6)))
+summary(glarma_model_1_6)
+
+thetaLags = c(1,2,5), type = "Poi", method = "FS",
+                    residuals = "Pearson", maxit = 100, grad = 2.22e-16)
+phiLags = c(1), type = "Poi", method = "FS",
+                      residuals = "Pearson"
+
+# grad = 2.22e-16 is a more computationally intensive/"precise" option
+
+```
 
 
 
