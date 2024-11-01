@@ -182,3 +182,32 @@ ggplot(temp_sum, aes(x = friday, y = avg_temp, color = as.factor(tank))) +
 #write_csv(temp_sum, here("experiment", "data", "weekly_temperature.csv"))
 ```
 
+# Extract 3-day lag average temperature for each tank
+```{r}
+date_sequence <- seq(from = as.Date("2023-09-25"), to = as.Date("2024-02-21"), by = "day")
+tuesdays_and_fridays <- date_sequence[weekdays(date_sequence) %in% c("Tuesday", "Friday")]
+
+#add a row to the dataframe 
+#temp_check <- rbind(temp_clean, data.frame(sensor = "x28_00000eb4cb62", tank = 1, timestamp = as.POSIXct("2023-10-10 12:01:10"), temperature = 100000, chill_set=14.75, severe_set=14.75, extreme_set=14.75, treatment="chill"))
+
+temp_sum_biweek <- temp_clean %>%
+  arrange(timestamp, tank) %>%
+  mutate(date = as.Date(timestamp)) %>%
+  filter(date >= min(tuesdays_and_fridays) & date <= max(tuesdays_and_fridays)) %>%
+  group_by(tank, treatment, date) %>%
+  summarize(avg_temp = mean(temperature, na.rm = TRUE), 
+            min_temp = min(temperature, na.rm = TRUE),
+            max_temp = max(temperature, na.rm = TRUE),
+            .groups = 'drop') %>%
+  ungroup() %>%
+  group_by(tank) %>%
+  mutate(avg_temp_last_3_days = zoo::rollmean(avg_temp, k = 3, fill = NA, align = "right"),
+         min_temp_last_3_days = zoo::rollapply(avg_temp, width = 3, FUN = min, fill = NA, align = "right"),
+         max_temp_last_3_days = zoo::rollmax(avg_temp, k = 3, fill = NA, align = "right")) %>%
+  ungroup() %>%
+  filter(date %in% tuesdays_and_fridays,
+         date > as.Date("2023-09-28"))
+
+#write_csv(temp_sum_biweek, here("experiment", "data", "three_day_temperature.csv"))
+```
+
