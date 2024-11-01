@@ -18,7 +18,7 @@ library(lme4) #GLMER
 library(nlme) #nlme
 #library(glmmTMB) #GLMER
 library(glarma)
-library(MASS) #GLARMA
+#library(MASS) #GLARMA
 library(tseries) #ADF test
 library(urca) #KPSS test
 library(forecast) #ts()
@@ -933,7 +933,7 @@ all_count_treatment <- all_count %>%
             upper = mean + ci) %>%
   dplyr::select(date, treatment, mean, sd, lower, upper)
 
-ggplot(all_count_treatment, aes(x=date,color=treatment)) +
+image <- ggplot(all_count_treatment, aes(x=date,color=treatment)) +
   geom_vline(xintercept = as.numeric(as.POSIXct("2023-12-12")), linetype = "dashed", color = "black", alpha = 0.8) +
   geom_smooth(aes(y=mean)) +
   geom_ribbon(aes(ymin = lower, ymax = upper, fill = treatment), alpha = 0.2, color = NA) +  # Cloud effect
@@ -945,17 +945,19 @@ ggplot(all_count_treatment, aes(x=date,color=treatment)) +
                    breaks= seq(min(all_count_treatment$date), max(all_count_treatment$date), length=7)) +
   labs(x = "Date",
        y = "Number of polyps",
-       color = "Treatment") +
+       color = "") +
   guides(fill = "none",
          color=guide_legend(override.aes=list(fill=NA))) +
-  theme_bw()
+  theme_bw() +
+  theme(text = element_text(size = 20),
+        legend.position = "top")
 
-ggsave(here("experiment", "figures", "WSN", "count_mhw.svg"), width=15, height=7)
+#ggsave(file = here("experiment", "figures", "WSN","count_mhw.svg"), plot = image, width=12, height=7)
 ```
 
 
 ```{r}
-ggplot(all_count_plot, aes(x=date,color=genet)) +
+ggplot(all_count_plot, aes(x=date,color=treatment)) +
   geom_vline(xintercept = as.numeric(as.POSIXct("2023-12-12")), linetype = "dashed", color = "black", alpha = 0.8) +
   geom_smooth(aes(y=mean), span = 0.5) +
   geom_ribbon(aes(ymin = lower, ymax = upper, fill = genet), alpha = 0.2, color = NA) +  # Cloud effect
@@ -967,13 +969,40 @@ ggplot(all_count_plot, aes(x=date,color=genet)) +
                    breaks= seq(min(all_count_plot$date), max(all_count_plot$date), length=7)) +
   labs(x = "Date",
        y = "Number of polyps",
-       color = "Treatment") +
+       color = "Genet") +
   guides(fill = "none",
          color=guide_legend(override.aes=list(fill=NA))) +
   theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        text = element_text(size = 20),
+        legend.position = "top")
 
-ggsave(here("experiment", "figures", "WSN", "count_treatment_genet.svg"), width=15, height=7)
+#ggsave(file = here("experiment", "figures", "WSN","count_treatment_genet.svg"), plot = image, width=12, height=7)
+
+image <- ggplot(all_count_plot, aes(x=date,color=treatment)) +
+  geom_vline(xintercept = as.numeric(as.POSIXct("2023-12-12")), linetype = "dashed", color = "black", alpha = 0.8) +
+  geom_smooth(aes(y=mean), span = 0.5) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = treatment), alpha = 0.2, color = NA) +  # Cloud effect
+  scale_color_manual(values = c("cold" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00"),
+                     labels = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW")) +  
+  scale_fill_manual(values = c("cold" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00"),
+                     labels = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW")) +
+  facet_wrap(~genet,
+             scales = "free_y",
+             labeller =  labeller(treatment = c("cold" = "Control", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
+  scale_x_datetime(date_labels = "%b %d", 
+                   breaks= seq(min(all_count_plot$date), max(all_count_plot$date), length=7)) +
+  labs(x = "Date",
+       y = "Number of polyps",
+       color = "") +
+  guides(fill = "none",
+         color=guide_legend(override.aes=list(fill=NA))) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        text = element_text(size = 20),
+        legend.position = "top")
+
+#ggsave(file = here("experiment", "figures", "WSN","count_genet_treatment.svg"), plot = image, width=12, height=7)
 ```
 
 
