@@ -12,13 +12,13 @@ library(tidyverse)
 library(janitor)
 library(here)
 library(lubridate)
+library(svglite) #save vector figures
 library(ggpmisc) #statpolyeq ggplot
 library(lme4) #GLMER
 library(nlme) #nlme
-library(glmmTMB) #GLMER
+#library(glmmTMB) #GLMER
 library(glarma)
-#library(MASS) #GLARMA
-library(forecast) #ARIMA
+library(MASS) #GLARMA
 library(tseries) #ADF test
 library(urca) #KPSS test
 library(forecast) #ts()
@@ -319,6 +319,7 @@ hist(all_count$n_true, breaks = seq(min(all_count$n_true)-0.5, max(all_count$n_t
      ylab = "Frequency", col = "lightblue")
 ```
 
+### Compare Poisson with NB model
 ```{r}
 # Fit a Poisson model
 poisson_growth <- glmer((growth_rate_cont+4) ~ treatment + day_numeric + (1|tank), family = poisson, data = all_count)
@@ -381,7 +382,7 @@ Neither count data nor growth rate appear to follow poisson distribution. And bo
 
 Growth rate contains negative numbers, which complicates the fact that it appears to follow negative binomial distribution. Let's focus on the raw count numbers for now and come back to growth rate later.
 
-Negative binomial distribution?
+### Negative binomial distribution?
 ```{r}
 nb_fit <- glmmTMB(n_true ~ time + (1|genet_tank), data = all_count, family = nbinom1)
 summary(nb_fit)
@@ -400,12 +401,13 @@ plot(residuals_nb, fitted_values_nb,
      main = "Residuals vs. Fitted Values")
 abline(h = 0, col = "red", lty = 2)
 ```
+Doesn't look too good. 
 
 ### Let's just jump straight into GLARMA and see what happens
 ```{r}
 y <- all_count$n_true %>%
   as.matrix()
-X <- model.matrix(n_true ~ treatment + genet, data = all_count)
+X <- model.matrix(n_true ~ treatment + genet+ treatment:genet + mhw, data = all_count)
 x <- model.matrix(n_true ~ treatment + genet + treatment:genet, data = all_count)
 
 #equivalent but more wordy
@@ -422,13 +424,15 @@ x <- model.matrix(n_true ~ treatment + genet + treatment:genet, data = all_count
 
 #glarma_model <- glarma(y, X, phiLags = c(1), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
 glarma_model <- glarma(y, x, phiLags = c(1), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+glarma_model_state <- glarma(y, X, phiLags = c(1), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
 
 summary(glarma_model)
-#summary(glarma_model_int)
+summary(glarma_model_state)
 #interaction model is better all around - which doesn't deviate from the GLMM
+# adding in state (MHW before vs after) improves model fit
 ```
 
-### Let's test GLARMA models now with different lags and distributions
+#### Let's test GLARMA models now with different lags and distributions
 ```{r}
 glarma_model_nr <- glarma(y, x, phiLags = c(1), type = "Poi", method = "NR", residuals = "Pearson", maxit = 100, grad = 1e-6)
 summary(glarma_model_nr) #no effect of NR vs FS other than computation time being faster for NR
@@ -482,11 +486,9 @@ for (model_name in names(models)) {
   print(paste(model_name, "=", aic_value))
 }
 # grad = 2.22e-16 is a more computationally intensive/"precise" option
-
-
 ```
 
-### Examine residuals
+#### Examine residuals
 ```{r}
 plot_residuals <- function(model, model_name) {
   # Extract residuals and fitted values
@@ -536,14 +538,14 @@ glarma_model_1_13 <- glarma(y, x, phiLags = c(1:13), type = "Poi", method = "FS"
 glarma_model_1_14 <- glarma(y, x, phiLags = c(1:14), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
 ```
 
-
+#### Plot residuals
 ```{r}
 plot_residuals(glarma_model_1_12, "1-12")
 plot_residuals(glarma_model_1_13, "1-13")
 ```
 Between lag 1:12 and 1:13 is where the QQ plot and residuals plot changes shape significantly and shifts to a new regime
 
-
+#### Check lags with day + week/month
 ```{r}
 glarma_model_week <- glarma(y, x, phiLags = c(1, 2), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
 glarma_model_2week <- glarma(y, x, phiLags = c(1, 4), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
@@ -551,6 +553,7 @@ glarma_model_month <- glarma(y, x, phiLags = c(1, 8), type = "Poi", method = "FS
 glarma_model_2month <- glarma(y, x, phiLags = c(1, 16), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
 ```
 
+#### Plot it
 ```{r}
 #plot_residuals(glarma_model_week, "day+week")
 plot_residuals(glarma_model_2week, "day+2week")
@@ -577,8 +580,8 @@ extractAIC(glarma_model_theta)
 extractAIC(glarma_model)
 plot.glarma(glarma_model)
 plot.glarma(glarma_model_theta)
-#very similar fits, phiLag is slightly better AIC so let's just stick with phiLag
 ```
+Very similar fits, phiLag is slightly better AIC so let's just stick with phiLag
 
 ### Compare "final" contender models
 ```{r}
@@ -589,9 +592,93 @@ summary(glarma_model_1_13) #one day through 6 weeks
 summary(glarma_model_1_30) #one through 30
 
 glarma_model_1_end <- glarma(y, x, phiLags = c(1:36), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+extractAIC(glarma_model_1_end)
 summary(glarma_model_1_end) #one day ago through "start" of experiment
 ```
 Glarma model with phiLags(1:36) is all around the best fit... but that seems fishy. Ask Chris! And let's move on.
+
+### Let's check the lag values with the state model
+```{r}
+glarma_model_week <- glarma(y, X, phiLags = c(16), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+glarma_model_2week <- glarma(y, X, phiLags = c(1, 16), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+glarma_model_month <- glarma(y, X, phiLags = c(1:8), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+glarma_model_2month <- glarma(y, X, phiLags = c(1:16), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+
+models <- list(
+  glarma_model_state = glarma_model,
+  glarma_model_week = glarma_model_week,
+  glarma_model_2week = glarma_model_2week,
+  glarma_model_month = glarma_model_month,
+  glarma_model_2month = glarma_model_2month
+)
+
+for (model_name in names(models)) {
+  aic_value <- extractAIC(models[[model_name]])  # [2] extracts the AIC value
+  aic_value <- format(aic_value, nsmall = 2)  # Format to 2 decimal places
+  print(paste(model_name, "=", aic_value))
+}
+#phiLags (1,16) significantly better, 1,2 1,4, 1,8 have equivalent AIC
+#phiLags (1:16) is significantly better, 1:8 is also good; 1:2, 1:4 have similar AIC to 1,2 and 1,4
+#phiLags (16) is best, 2, 4, 8 have similar AIC values
+#comparing "best of the best", 16 and 1, 16 are worst. 1:8 and 1:16 are best
+
+glarma_model_long <- glarma(y, X, phiLags = c(1:36), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+extractAIC(glarma_model_long)
+summary(glarma_model_long)
+
+plot_residuals(glarma_model_state, "Lag1")
+plot.glarma(glarma_model_state)
+
+glarma_model_state_13<- glarma(y, X, phiLags = c(1:13), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+```
+
+### Plot it
+```{r}
+plot_residuals(glarma_model_state_13, "Lag13")
+plot.glarma(glarma_model_state_13)
+plot_residuals(glarma_model_long, "LagAll")
+plot.glarma(glarma_model_long)
+```
+
+Once you get to lags(1:36), the addition of the state variable doesn't matter (the model AICs are equivalent between phiLag(1:36) for model with state versus model without state) So... where to go from here? Probably compare with summaries. 
+
+### Let's try working with the lagged count data?
+```{r}
+count_glarma_lag <- all_count %>%
+  arrange(date) %>%
+  group_by(tank, genet) %>%
+  mutate(lag1 = lag(n_true, 1))
+
+count_glarma_mhw <- all_count %>%
+  filter(mhw == "during")
+  
+y2 <- count_glarma_mhw$n_true %>%
+  as.matrix()
+x2 <- model.matrix(n_true ~ treatment+genet, data = count_glarma_mhw)
+glarma_model_mhwonly <- glarma(y2, x2, phiLags = c(1), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
+plot_residuals(glarma_model_mhwonly, "Lag13")
+plot.glarma(glarma_model_mhwonly)
+fitted_values <- fitted(glarma_model_mhwonly)
+result_df <- data.frame(PredictorVariables = x2, FittedValues = fitted_values) %>%
+  filter(fitted_values < 15)
+
+res <- residuals(glarma_model_mhwonly)
+fitted_values <- fitted(glarma_model_mhwonly)
+  
+  # Create a data frame for plotting
+residuals_data <- data.frame(
+    Fitted = fitted_values,
+    Residuals = res
+  )
+
+ggplot(residuals_data, aes(x = Fitted, y = Residuals)) +
+    geom_point(alpha = 0.5) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+    labs(title = paste(model_name, " - Residuals vs Fitted"), 
+         x = "Fitted Values", 
+         y = "Residuals") +
+    theme_bw() 
+```
 
 ## Count data - something different, GLMM with autocorrelation
 ```{r}
@@ -627,7 +714,7 @@ count_glmm4 <- lme(n_true ~ treatment + genet + treatment:genet, #same syntax as
 AIC(count_glmm4, count_glmm3) #same AIC
 ```
 
-
+### Check residuals
 ```{r}
 residual_values <- residuals(count_glmm3)
 fitted_values <- fitted(count_glmm3)
@@ -646,7 +733,7 @@ qqnorm(residual_values)
 qqline(residual_values, col = "red")
 title("QQ Plot of Residuals")
 ```
-Residual plot looks off, let's try NB GLMM...
+Residual plot looks off...
 
 ### Simpler models
 ```{r}
@@ -742,10 +829,36 @@ AIC(count_glmm14, count_glmm15) #corARMA better
 BIC(count_glmm14, count_glmm15) #corARMA better
 ```
 
+### Let's look at "final" GLMM options with corARMA
+```{r}
+count_glmm14 <- lme(n_true ~ treatment*genet,
+                   random = ~1|genet_tank,
+                   data = all_count,
+                   correlation = corARMA(p = 4, q = 1))
+
+count_glmm16 <- lme(n_true ~ treatment*genet + mhw,
+                   random = ~1|genet_tank,
+                   data = all_count,
+                   correlation = corARMA(p = 4, q = 1))
+
+count_glmm17 <- lme(n_true ~ treatment*genet + mhw:treatment,
+                   random = ~1|genet_tank,
+                   data = all_count,
+                   correlation = corARMA(p = 4, q = 1),
+                   control = lmeControl(maxIter = 100, msMaxIter = 100))
+summary(count_glmm14)
+summary(count_glmm16)
+summary(count_glmm17)
+AIC(count_glmm14, count_glmm16, count_glmm17) 
+BIC(count_glmm14, count_glmm16, count_glmm17)
+```
+Adding in the "state" of the marine heatwave makes things worse all around / mhw isn't significant. Which I guess makes sense since even in the control the curves flattened out?
+
+
 ### Let's plot something up for the GLMM
 ```{r}
 all_count_plot <- all_count %>%
-  select(date, tank, genet, genet_tank, treatment, n_true) %>%
+  dplyr::select(date, tank, genet, genet_tank, treatment, n_true) %>%
   group_by(date, treatment, genet) %>%
   summarize(mean = mean(n_true),
             sd = sd(n_true),
@@ -753,7 +866,8 @@ all_count_plot <- all_count %>%
             ci = qt(0.95, length(n_true)-1)*se,
             lower = mean - ci,
             upper = mean + ci) %>%
-  select(date, treatment, genet, mean, sd, lower, upper)
+  dplyr::select(date, treatment, genet, mean, sd, lower, upper)
+
 
 ggplot(all_count_plot, aes(x=date,color=genet)) +
   geom_point(aes(y=mean)) +
@@ -762,22 +876,6 @@ ggplot(all_count_plot, aes(x=date,color=genet)) +
   facet_wrap(~treatment) +
   labs(x = "Date",
        y = "Count")
-
-ggplot(all_count_plot, aes(x=date,color=genet)) +
-  geom_point(aes(y=logmean)) +
-  facet_wrap(~treatment) +
-  labs(x = "Date",
-       y = "Count")
-
-# Get predictions
-all_count$predicted <- predict(count_glmm14)
-
-# Plot
-ggplot(all_count, aes(x = n_true, y = predicted)) +
-  geom_point() +
-  geom_abline(slope = 1, intercept = 0, color = "red") +
-  labs(x = "Actual Values", y = "Predicted Values") +
-  theme_minimal()
 
 # Calculate residuals
 all_count$residuals <- residuals(count_glmm14)
@@ -796,24 +894,96 @@ ggplot(all_count, aes(x = treatment, y = n_true, color = genet)) +
   theme_minimal()
 ```
 
-We need a nonlinear regression, the curves are logistic for sure
+#### We might need a nonlinear regression, the curves are logistic
 ```{r}
 glmer1 <- glmer.nb(n_true ~ treatment*genet + (1|genet_tank), 
                 data = all_count)
 
 summary(glmer1)
 #Well that is terrible.
+```
 
+### Check dispersion
+```{r}
 all_count_dispersion <- all_count %>%
   group_by(genet_tank) %>%
   summarize(mean = mean(n_true),
             var = var(n_true),
             ratio = var/mean)
 
+all_count_dispersion_genet <- all_count %>%
+  group_by(genet) %>%
+  summarize(mean = mean(n_true),
+            var = var(n_true),
+            ratio = var/mean)
+```
+Actually, if the data is organized by individual groupings (genet_tank OR genet only) it's not actually that overdispersed. Some of them are actually underdispersed. Let's keep this in mind for model interpretation. 
 
+## Plot up count data for WSN 
+### Treatment not significant
+```{r}
+all_count_treatment <- all_count %>%
+  dplyr::select(date, tank, genet, genet_tank, treatment, n_true) %>%
+  group_by(date, treatment) %>%
+  summarize(mean = mean(n_true),
+            sd = sd(n_true),
+            se = sd(n_true)/sqrt(length(n_true)),
+            ci = qt(0.95, length(n_true)-1)*se,
+            lower = mean - ci,
+            upper = mean + ci) %>%
+  dplyr::select(date, treatment, mean, sd, lower, upper)
+
+ggplot(all_count_treatment, aes(x=date,color=treatment)) +
+  geom_vline(xintercept = as.numeric(as.POSIXct("2023-12-12")), linetype = "dashed", color = "black", alpha = 0.8) +
+  geom_smooth(aes(y=mean)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = treatment), alpha = 0.2, color = NA) +  # Cloud effect
+  scale_color_manual(values = c("cold" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00"),
+                     labels = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW")) +  
+  scale_fill_manual(values = c("cold" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00"),
+                     labels = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW")) +
+  scale_x_datetime(date_labels = "%b %d", 
+                   breaks= seq(min(all_count_treatment$date), max(all_count_treatment$date), length=7)) +
+  labs(x = "Date",
+       y = "Number of polyps",
+       color = "Treatment") +
+  guides(fill = "none",
+         color=guide_legend(override.aes=list(fill=NA))) +
+  theme_bw()
+
+ggsave(here("experiment", "figures", "WSN", "count_mhw.svg"), width=15, height=7)
 ```
 
 
+```{r}
+ggplot(all_count_plot, aes(x=date,color=genet)) +
+  geom_vline(xintercept = as.numeric(as.POSIXct("2023-12-12")), linetype = "dashed", color = "black", alpha = 0.8) +
+  geom_smooth(aes(y=mean), span = 0.5) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = genet), alpha = 0.2, color = NA) +  # Cloud effect
+  scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  scale_fill_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  facet_wrap(~treatment,
+             labeller =  labeller(treatment = c("cold" = "Control", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
+  scale_x_datetime(date_labels = "%b %d", 
+                   breaks= seq(min(all_count_plot$date), max(all_count_plot$date), length=7)) +
+  labs(x = "Date",
+       y = "Number of polyps",
+       color = "Treatment") +
+  guides(fill = "none",
+         color=guide_legend(override.aes=list(fill=NA))) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(here("experiment", "figures", "WSN", "count_treatment_genet.svg"), width=15, height=7)
+```
+
+
+```{r}
+ggplot(all_count, aes(x = treatment, y = n_true, color = genet)) +
+  geom_point(position = position_jitter(width = 0.2)) +
+  stat_summary(fun = mean, geom = "line", aes(group = genet)) +
+  labs(x = "Treatment", y = "n_true") +
+  theme_minimal()
+```
 
 
 ## Body size data - ARIMA forecasting
