@@ -2083,7 +2083,7 @@ load(file.path("experiment", "data", "draft", "columbia-river.rda"))
 
 ### lake plankton data
 ```{r}
-data(lakeWAplankton, package = "MARSS")
+data(lakeWAplankton, package = "MARSS") 
 # lakeWA
 fulldat <- lakeWAplanktonTrans
 years <- fulldat[, "Year"] >= 1965 & fulldat[, "Year"] < 1975
