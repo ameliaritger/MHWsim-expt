@@ -9,17 +9,22 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+# Import data
+```{r}
+source("mergeAllData.R", local = knitr::knit_global())
+```
+
+
 # Create clean df
 ```{r}
 behavior_clean <- all %>%
   mutate(genet_tank = paste(tank, genet, sep = "")) %>%
   dplyr::select(date, tank, genet, genet_tank, treatment, mhw, n_true, percent_fully_open, percent_closed)
-
 ```
 
 # Initial plot to visualize trends
 ```{r}
-ggplot(behavior_clean, aes(x = genet, y = percent_fully_open, fill = genet, group = interaction(genet, mhw), shape = mhw)) +
+image <- ggplot(behavior_clean, aes(x = genet, y = percent_fully_open, fill = genet, group = interaction(genet, mhw), shape = mhw)) +
   geom_point(aes(color = genet), position = position_dodge(width = 0.9), alpha = 0.5) +
   geom_violin(aes(size = mhw), position = position_dodge(width = 0.9), alpha = 0.3, color = alpha("black", 0.75)) +
   facet_wrap(~treatment,
@@ -29,14 +34,17 @@ ggplot(behavior_clean, aes(x = genet, y = percent_fully_open, fill = genet, grou
   # change color of violin 
   scale_fill_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
   scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
-  theme_minimal() +
   labs(x = "Genet",
        y = "% open polyps",
        color = "Genet",
        shape = "MHW",
        size = "MHW") +
   guides(fill = "none",
-         color = "none")
+         color = "none") +
+  theme_bw() +
+  theme(text = element_text(size = 20))
+
+#ggsave(file = here("experiment", "figures", "WSN","behavior.svg"), plot = image, width=12, height=7)
 ```
 
 ## Check ANOVA assumptions
@@ -150,44 +158,79 @@ qqline(residuals(model_with_interactions), col = "red")
 ```
 
 ```{r}
-identify_outliers <- function(value) {
-  # Ensure 'value' is a numeric vector
-  if (!is.numeric(value)) {
-    stop("Input value must be numeric.")
-  }
-  
-  # Calculate Q1 (25th percentile), Q3 (75th percentile), and IQR (Interquartile Range)
-  Q1 <- quantile(value, 0.25, na.rm = TRUE)
-  Q3 <- quantile(value, 0.75, na.rm = TRUE)
-  IQR <- Q3 - Q1
-  
-  # Define the lower and upper bounds for outliers
-  lower_bound <- Q1 - 1.5 * IQR
-  upper_bound <- Q3 + 1.5 * IQR
-  
-  # Identify outliers
-  outliers <- value[value < lower_bound | value > upper_bound]
-  
-  # Return the outliers
-  return(outliers)
-}
-
 behavior_sum <- behavior_clean %>%
   group_by(treatment, mhw, genet) %>%
   summarize(n = n(),
             mean = mean(percent_fully_open),
-            sd = sd(percent_fully_open),
-            outliers = identify_outliers(percent_fully_open))
-
-# identify outliers
-behavior_sum %>%
-  filter(mean > 0.5) %>%
-  arrange(desc(mean))
+            sd = sd(percent_fully_open))
 ```
 
 ```{r}
+autoArima <- auto.arima(behavior_clean$percent_fully_open, seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
+summary(autoArima)
+
+behavior_arma <- lme(percent_fully_open ~ treatment * genet + mhw,
+                   random = ~1|genet_tank,
+                   data = behavior_clean,
+                   correlation = corARMA(p = 4, q = 1))
 ```
 
+
+```{r}
+summary(behavior_arma)
+residuals <- residuals(behavior_arma)
+fitted_values <- fitted(behavior_arma)
+
+# Residuals vs Fitted Plot
+par(mfrow = c(1, 2)) # Set up the plot layout for two plots side by side
+
+# Plot 1: Residuals vs Fitted
+plot(fitted_values, residuals, 
+     xlab = "Fitted Values", 
+     ylab = "Residuals", 
+     main = "Residuals vs Fitted",
+     pch = 16, col = "gray")
+abline(h = 0, col = "red", lty = 2) # Add a horizontal line at 0
+
+# Plot 2: Spread-Level Plot (Scale-Location Plot)
+# Use sqrt of the absolute residuals
+plot(fitted_values, sqrt(abs(residuals)), 
+     xlab = "Fitted Values", 
+     ylab = "Sqrt(|Residuals|)", 
+     main = "Spread-Level Plot",
+     pch = 16, col = "gray")
+```
+
+```{r}
+behavior_arma2 <- lme(percent_fully_open ~ treatment * genet + mhw,
+                   random = ~1|genet_tank,
+                   data = behavior_clean,
+                   correlation = corARMA(p = 4, q = 2))
+
+behavior_ar <- lme(percent_fully_open ~ treatment * genet + mhw,
+                   random = ~1|genet_tank,
+                   data = behavior_clean,
+                   correlation = corAR1(form = ~ 1 | genet_tank))
+
+behavior_ar2 <- lme(percent_fully_open ~ treatment * genet,
+                   random = ~1|tank,
+                   data = behavior_clean,
+                   correlation = corAR1(form = ~ 1 | tank))
+```
+
+```{r}
+behavior_arma2 <- lme(percent_fully_open ~ treatment * genet + mhw,
+                   random = ~1|genet_tank,
+                   data = behavior_clean,
+                   correlation = corARMA(p = 4, q = 3))
+
+acf(residuals(behavior_arma), main = "ACF of Residuals")
+pacf(residuals(behavior_arma), main = "PACF of Residuals")
+
+acf(residuals(behavior_arma2), main = "ACF of Residuals")
+pacf(residuals(behavior_arma2), main = "PACF of Residuals")
+
+```
 
 
 
