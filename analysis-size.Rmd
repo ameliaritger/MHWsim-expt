@@ -1,0 +1,50 @@
+---
+title: "Body size - growth rates analysis"
+author: "Amelia Ritger"
+date: "2024-11-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(nlme) #lme()
+library(knitr) #kable()
+```
+
+# Load Tidied Data
+```{r, include = FALSE}
+source("mergeAllData.R", local = knitr::knit_global())
+
+#Load temperature data AFTER you have run source(ReadRPiData)
+weekly_temp <- read_csv(here("experiment", "data", "weekly_temperature.csv"))
+daily_temp <- read_csv(here("experiment", "data", "three_day_temperature.csv")) %>%
+  mutate(date = if_else(date == ymd("2023-09-29"), ymd("2023-10-01"), date))
+```
+
+## Create tidied df
+```{r}
+all_size <- all %>%
+  filter(!is.na(avg_size)) %>%
+  mutate(avg_size_log = log(avg_size)) %>%
+  group_by(tank, genet) %>%
+  mutate(avg_size_diff = avg_size_log - lag(avg_size_log),
+         avg_size_diff2 = avg_size_diff - lag(avg_size_diff)) %>%
+  ungroup()
+```
+
+### Prepare data
+```{r}
+all_count <- all %>%
+  #convert date to a numeric sequence
+  mutate(date_num = as.numeric(as.Date(date)-min(as.Date(date))),
+         mhw_binary = as.factor(ifelse(mhw == "during", 0, 1))) %>%
+  dplyr::select(date_num, date, tank, genet, treatment, mhw, mhw_binary, n_true, growth_rate, growth_rate_cont) %>%
+  rename(growth_rate_mhw = growth_rate) %>% #relabel for better understanding. growth_rate_mhw is where the growth rate resets to zero when the MHW ends. I believe I won't need growth_rate_mhw for GLARMA model because I can add state as a potential covariate.
+  mutate(genet_tank = paste(tank, genet, sep = ""), #merge genet and tank because each unique genet x tank value is going to be autocorrelated
+         intercept = 1) # create intercept of 1s for glarma
+
+count_temp <- all_count %>%
+  mutate(week = as.numeric(difftime(date, min(weekly_temp$friday), units = "weeks")) + 1,
+         tank = as.numeric(tank)) %>%
+  left_join(daily_temp, by = c("date", "tank"))
+```
