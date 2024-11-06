@@ -13,6 +13,7 @@ library(here)
 library(lubridate)
 library(janitor)
 library(ggpubr)
+library(svglite) #save vector figures
 ```
 
 # Load data and merge all temp files
@@ -108,7 +109,8 @@ plot_set <- ggplot(temp_clean, aes(x=timestamp)) +
   theme_minimal() +
   labs(x = "Date",
        y = "Temperature") +
-  theme(legend.position = "top")
+  theme(legend.position = "top",
+        text = element_text(size = 20))
 ```
 
 # Plot tank temps averaged across treatments
@@ -117,16 +119,17 @@ temp_sorted <- temp_clean %>%
   group_by(timestamp, chill_set, severe_set, extreme_set, treatment) %>%
   summarize(avg_temp = mean(temperature, na.rm=TRUE)) %>%
   ungroup() %>%
-  filter(timestamp > ymd_hms("2023-09-22 12:00:00")) #remove first 24 hours after addition of Corynactis because temperature fluctuations as I was messing around with heaters/chillers
+  filter(timestamp > ymd_hms("2023-09-22 12:00:00"),
+         timestamp < ymd_hms("2024-02-21 10:00:00")) #remove first 24 hours after addition of Corynactis because temperature fluctuations as I was messing around with heaters/chillers
 
-plot_avg <- ggplot(temp_sorted, aes(x=timestamp)) +
+ggplot(temp_sorted, aes(x=timestamp)) +
   #geom_line(aes(y=chill_set, color="chill_set"), linetype="dashed") +
   #geom_line(aes(y=severe_set, color="severe_set"), linetype="dashed") +
   #geom_line(aes(y=extreme_set, color="extreme_set"), linetype="dashed") +
   geom_line(aes(y=avg_temp, color=treatment)) +
   scale_color_manual(name = "",
                      values = c("chill" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00"),
-                     labels = c("chill" = "Ambient Treatment", "severe" = "Severe MHW", "extreme" = "Extreme MHW")) +
+                     labels = c("chill" = "Control", "severe" = "Severe MHW", "extreme" = "Extreme MHW")) +
 #  scale_color_manual(name = "Treatment",
 #                     values = c("chill" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00",
 #                                "chill_set" = "#003D52", "severe_set" = "#C28200", "extreme_set" = "#A53E00"),
@@ -134,14 +137,15 @@ plot_avg <- ggplot(temp_sorted, aes(x=timestamp)) +
 #                                "chill_set" = "Ambient Set Point", "severe_set" = "Severe Set Point", "extreme_set" = #"Extreme Set Point"),
 #                     guide=guide_legend(override.aes = list(keyheight=10,alpha=1))) +
   scale_y_continuous(breaks = seq(12, 26, 2), limits = c(12, 27)) +
-  theme_minimal() +
+  theme_bw() +
   labs(x = "Date",
        y = "Temperature") +
-  theme(legend.position = "top")
+  theme(legend.position = "top",
+        text = element_text(size = 20))
 
-ggarrange(plot_set, plot_avg, ncol = 1)
-
-#ggsave(here("experiment", "figures", "avg_tank_temp_stacked.png"), width=12, height=9)
+ggsave(here("experiment", "figures", "WSN","avg_temps.png"), width=12, height=7)
+#image <- ggarrange(plot_set, plot_avg, ncol = 1)
+#ggsave(file = here("experiment", "figures", "WSN","avg_temps.svg"), plot = image, width=12, height=9)
 ```
 
 # Plot tank temps for each tank
@@ -150,7 +154,7 @@ temp_clean <- temp_clean %>%
   mutate(tank = as.factor(tank)) %>%
   filter(timestamp < ymd_hms("2024-02-21 10:00:00"))
 
-ggplot(temp_clean, aes(x=timestamp)) +
+plot_tank <- ggplot(temp_clean, aes(x=timestamp)) +
   #geom_line(aes(y=chill_set, color="chill_set"), linetype="dashed") +
   #geom_line(aes(y=severe_set, color="severe_set"), linetype="dashed") +
   #geom_line(aes(y=extreme_set, color="extreme_set"), linetype="dashed") +
@@ -171,6 +175,10 @@ ggplot(temp_clean, aes(x=timestamp)) +
        y = "Temperature",
        color = "Tank") +
   theme(legend.position = "top")
+
+image <- ggarrange(plot_set, plot_tank, ncol = 1)
+
+#ggsave(file = here("experiment", "figures", "WSN","tank_temps.svg"), plot = image, width=12, height=9)
 ```
 
 
