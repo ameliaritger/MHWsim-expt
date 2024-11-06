@@ -67,7 +67,7 @@ model1 <- aov(percent_fully_open ~ mhw * treatment * genet, data = behavior_clea
 model2 <- lmer(percent_fully_open ~ mhw * treatment * genet + (1 | genet_tank), data = behavior_clean)
 
 # Extract residuals
-residuals <- residuals(model)
+residuals <- residuals(model1)
 
 # Q-Q plot
 qqnorm(residuals)
