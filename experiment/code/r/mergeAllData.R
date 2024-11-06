@@ -4,7 +4,7 @@ library(here)
 library(lubridate)
 
 #Load body size data
-source("readBodySizeData.R", local = knitr::knit_global())
+body_size <- read_csv(here("experiment", "data", "body_size.csv"))
 
 #Load count data
 alive <- read_csv(here("experiment", "data", "mortality.csv")) %>% 

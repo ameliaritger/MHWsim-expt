@@ -28,9 +28,10 @@ library(gridExtra) #grid.arrange()
 library(MARSS)
 ```
 
-# Run this ONE TIME to load temperature data, then save the file to your local machine
+# Run this ONE TIME to load temperature/body size data, then save the file to your local machine
 ```{r}
 #source("readRPiData.R", local = knitr::knit_global())
+#source("readBodySizeData.R", local = knitr::knit_global())
 ```
 
 # Load Tidied Data

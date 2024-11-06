@@ -59,5 +59,9 @@ body_size <- all_data %>%
             samplers=n_distinct(sampler)) %>%
   ungroup()
 
+##save body size data - grouped + raw/all
+write.csv(body_size, file = here("experiment", "data", "body_size.csv"), row.names = FALSE)
+write.csv(all_data, file = here("experiment", "data", "body_size_all.csv"), row.names = FALSE)
+
 #remove everything from environment except cleaned data
 rm(list=ls()[!ls() %in% c("rpi_temp", "body_size")])
