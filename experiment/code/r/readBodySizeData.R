@@ -16,7 +16,7 @@ for (temp_name in file_names){
   file.temp <- read_excel(paste0(pathname, "/", temp_name), trim_ws = TRUE) %>%
     select(!matches("[[:digit:]]")) %>% #remove columns that contain numbers (i.e. empty columns)
     clean_names() %>%
-    fill(sampler, date_analysis, photo_name, tile_number, .direction = "down") %>% #fill in missing rows
+    fill(sampler, date_analysis, date_photo, tank_number, genet, photo_name, tile_number, .direction = "down") %>% #fill in missing rows
     mutate(tile_number = as.factor(tile_number)) %>%
     #rename column containing some version of the word "flag" as "hello"
     rename(flag = contains("flag")) %>% #rename column containing some version of the word "flag" as "hello"

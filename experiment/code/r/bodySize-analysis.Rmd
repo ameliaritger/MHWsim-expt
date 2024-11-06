@@ -30,7 +30,7 @@ for (temp_name in file_names){
   file.temp <- read_excel(paste0(pathname, "/", temp_name), trim_ws = TRUE) %>%
     select(!matches("[[:digit:]]")) %>% #remove columns that contain numbers (i.e. empty columns)
     clean_names() %>%
-    fill(sampler, date_analysis, photo_name, tile_number, .direction = "down") %>% #fill in missing rows
+    fill(sampler, date_analysis, date_photo, tank_number, genet, photo_name, tile_number, .direction = "down") %>% #fill in missing rows
     mutate(tile_number = as.factor(tile_number)) %>%
     #rename column containing some version of the word "flag" as "hello"
     rename(flag = contains("flag")) %>% #rename column containing some version of the word "flag" as "hello"
@@ -129,13 +129,14 @@ data_to_check <- data_clean %>%
             polyps_counted = n())
   
 merged_check <- left_join(master, data_to_check, by = c("date", "tank", "genet")) %>%
-  filter(!is.na(sampler)) %>%
+  filter(!is.na(sampler),
+         sampler == "Sophia") %>%
   mutate(diff = abs(n-polyps_counted),
          diff2 = abs(alive-polyps_counted),
          #identify minimum value between diff and diff2
          min_diff = pmin(diff, diff2)) %>%
   arrange(sampler, tank, date, genet) %>%
-  filter(min_diff > 3,
+  filter(min_diff > 1,
          #sampler %in% c("Lili"),
          !(date == ymd("2023-10-13") & tank == 1 & genet == "D"),
          !(date == ymd("2023-10-13") & tank == 1 & genet == "E"),
