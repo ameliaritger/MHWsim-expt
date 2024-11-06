@@ -20,9 +20,9 @@ library(chron) #convert decimal time
 library(EDIutils) #to download LTER data
 library(xml2) #to open LTER xlsx data
 
-source("read_sbc_data.r")
-dt <- read.csv(here("experiment", "data", "vw_timeseries_entities.csv") ,stringsAsFactors = FALSE)
-dsname <- "Moored CTD and ADCP: NAP - Moored CTD and ADCP at Naples Reef NAP"
+#source(here("experiment", "code", "r", "read_sbc_data.r"))
+#dt <- read.csv(here("experiment", "data", "vw_timeseries_entities.csv") ,stringsAsFactors = FALSE)
+#dsname <- "Moored CTD and ADCP: NAP - Moored CTD and ADCP at Naples Reef NAP"
 ```
 
 Moored CTD and ADCP: ARQ - Moored CTD and ADCP at Arroyo Quemado Reef ARQ
@@ -32,9 +32,9 @@ Moored CTD and ADCP: NAP - Moored CTD and ADCP at Naples Reef NAP
 
 #Load data
 ```{r}
-raw_temp <-  read_sbc_data(dsname) %>%
-  select(year, month, day,  decimal_time, Temp_adcp, Temp_top, Temp_mid, Temp_bot,  ADCP_depth) %>%
-  clean_names()
+#raw_temp <-  read_sbc_data(dsname) %>%
+#  select(year, month, day,  decimal_time, Temp_adcp, Temp_top, Temp_mid, Temp_bot,  ADCP_depth) %>%
+#  clean_names()
 ```
 
 #Clean up the data
@@ -228,7 +228,7 @@ mhw_subset <- mhw$climatology %>%
          thresh3=seas+8,
          extreme=temp+4,
          chill=temp-4) %>%
-  filter(t>=ymd("2015-09-01") & t<ymd("2015-10-01"))
+  filter(t>=ymd("2015-09-01") & t<ymd("2016-03-01"))
  
 #mhw_profile_mko <- mhw$climatology %>%
 # select(t, temp) %>%
@@ -292,7 +292,7 @@ ggplot(mhw_subset, aes(x = t, ymax = pmax(thresh, temp), ymin = thresh)) +
 library(chron)
 
 mhw_subset_diurnal <- temp_clean %>%
-  filter(date>=ymd("2015-09-01") & date<ymd("2015-10-01")) %>%
+  filter(date>=ymd("2015-09-01") & date<ymd("2016-03-01")) %>%
   mutate(t = date,
          time=format(times(decimal_time))) %>%
   unite(date_time, c(t, time), sep = " ", remove = TRUE) %>% # combine the date and time columns
@@ -348,27 +348,32 @@ mhw_subset_comb <- left_join(mhw_subset_avg, mhw_subset, by="t") %>%
   mutate_at(vars(temp.y,chill.y,extreme.y), funs(replace(., duplicated(.), NA))) #don't fill with values, but with NAs (for ggplot)
 
 ggplot(mhw_subset_comb, aes(x = date_time)) +
-      geom_line(data=mhw_subset_comb[!is.na(mhw_subset_comb$seas),], aes(y = seas), colour="black", size = 0.8, linetype="dotted") +
+  #geom_line(data=mhw_subset_comb[!is.na(mhw_subset_comb$seas),], aes(y = seas), colour="black", size = 0.8, linetype="dotted") +
   geom_line(aes(y = temp.x, colour = "temp"), size = 0.8) +
-  geom_line(aes(y = extreme.x, colour = "extreme"), size = 0.8) +
-  geom_line(aes(y = chill.x, colour = "chill"), size = 0.8) +
-  geom_line(data=mhw_subset_comb[!is.na(mhw_subset_comb$temp.y),], aes(y = temp.y, colour = "temp2"), size = 0.8, alpha=0.7, linetype="dashed") +
-  geom_line(data=mhw_subset_comb[!is.na(mhw_subset_comb$chill.y),], aes(y = chill.y, colour = "chill2"), size = 0.8, alpha=0.7, linetype="dashed") +
-  geom_line(data=mhw_subset_comb[!is.na(mhw_subset_comb$extreme.y),], aes(y = extreme.y, colour = "extreme2"), size = 0.8, alpha=0.7, linetype="dashed") +
+  #geom_line(aes(y = extreme.x, colour = "extreme"), size = 0.8) +
+  #geom_line(aes(y = chill.x, colour = "chill"), size = 0.8) +
+  geom_line(data=mhw_subset_comb[!is.na(mhw_subset_comb$temp.y),], aes(y = temp.y, colour = "temp2"), size = 1, alpha=0.7, linetype="dashed") +
+  #geom_line(data=mhw_subset_comb[!is.na(mhw_subset_comb$chill.y),], aes(y = chill.y, colour = "chill2"), size = 1, alpha=0.7, linetype="dashed") +
+  #geom_line(data=mhw_subset_comb[!is.na(mhw_subset_comb$extreme.y),], aes(y = extreme.y, colour = "extreme2"), size = 1, alpha=0.7, linetype="dashed") +
   scale_colour_manual(name = "Line Colour",
-                      values = c("chill2" =  "blue",
-                                 "temp2" = "red", 
-                                 "extreme2" =  "purple",
-                                 "chill" =  "dodgerblue4",
-                                 "temp" = "darkred", 
-                                 "extreme" =  "darkorchid4"),
-                      labels= c("Historical climate", "Historical HW trend", "Extreme HW", "Extreme HW trend", "Historical HW", "Historical HW trend")) +
+                      values = c("chill2" =  "#003D52",
+                                 "temp2" = "#C28200", 
+                                 "extreme2" =  "#A53E00",
+                                 "chill" =  "#0072B2",
+                                 "temp" = "#E69F00", 
+                                 "extreme" =  "#D55E00"),
+                      labels= c("chill2" =  "Historical climate trend",
+                                "extreme2" =  "Extreme MHW trend",
+                                 "temp2" = "Severe MHW trend", 
+                                 "chill" =  "Historical climate",
+                                 "temp" = "Severe MHW", 
+                                 "extreme" =  "Extreme MHW")) +
   scale_x_datetime(date_labels = "%b %d",
-               breaks = scales::date_breaks("1 week"),
+               breaks = scales::date_breaks("1 month"),
                expand=c(0,0),
                limits = c(min(mhw_subset_avg$date_time), 
                          max = max(mhw_subset_avg$date_time))) +
-  scale_y_continuous(limits = c(13, 27), breaks = seq(13, 27, by = 2)) +
+  scale_y_continuous(limits = c(8, 26), breaks = seq(8, 26, by = 3)) +
   guides(colour = guide_legend(override.aes = list(fill = NA))) +
   labs(y = expression(paste("Temperature (", degree, "C)")),
        x = "Date") +
@@ -381,7 +386,7 @@ ggplot(mhw_subset_comb, aes(x = date_time)) +
         legend.position="top",
         legend.title = element_blank())
 
-#ggsave(here("figures", "MHWsim_all.png"), width = 20, height = 7)
+ggsave(here("experiment", "figures", "WSN", "BlobTemps_severe.png"), width = 12, height = 7)
 ```
 
 #Decide what value of C for "chilled" treatment
