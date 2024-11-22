@@ -21,6 +21,7 @@ library(EDIutils)
 library(xml2)
 library(chron) #convert decimal time
 library(ggpubr) #combine multiple ggplots
+library(svglite) #save vector figures
 ```
 
 ```{r}
@@ -182,7 +183,7 @@ mko_mhw <- mhw$climatology %>%
 
 #plot clean ribbon
 #y <- 
-ggplot(mko_mhw, aes(x = t, ymax = pmax(thresh, temp), ymin = thresh)) +
+image <- ggplot(mko_mhw, aes(x = t, ymax = pmax(thresh, temp), ymin = thresh)) +
     annotate("rect", xmin=ymd("2018-07-01"), xmax=ymd("2018-07-31"), ymin=-Inf, ymax=Inf, alpha=0.2,fill="#999999") + #or use ymin ymax -Inf Inf
   geom_line(aes(y = seas, colour = "seas"), size = 0.8) +
   geom_ribbon(fill = "#D55E00") +
@@ -205,18 +206,23 @@ ggplot(mko_mhw, aes(x = t, ymax = pmax(thresh, temp), ymin = thresh)) +
   guides(colour = guide_legend(override.aes = list(fill = NA))) +
   labs(y = expression(paste("Temperature (", degree, "C)")),
        x = "Date") +
+       #title = "A") +
   theme_bw() +
   #add 1 inch white space to right of graph
-  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=14),
-        axis.text.y=element_text(size=14),
-        axis.title.x=element_text(size=18),
-        axis.title.y=element_text(size=18),
-        legend.text=element_text(size=12),
-        legend.position="top",
-        legend.title = element_blank(),
-        plot.margin = unit(c(0, 0.6, 0, 0.5), "cm"))
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=18),
+        axis.text.y=element_text(size=18),
+        axis.title.x=element_text(size=20),
+        axis.title.y=element_text(size=20),
+        #make legend text bigger
+        legend.text=element_text(size=16),
+        legend.title=element_blank(),
+        legend.position="top")
+        #plot.margin = unit(c(0, 0.6, 0, 0.5), "cm"),
+        #plot.title = element_text(size=40))
 
 #ggsave(here("experiment", "figures", "mhw_year.png"), width=12, height=6)
+#ggsave(file = here("experiment", "figures", "methodsPub","Fig1A.svg"), plot = image, width=12, height=6.2)
+
 ```
 
 Plot daily variation
@@ -233,7 +239,7 @@ adcp_event <- adcp_daily %>%
   select(date_time, temp_adcp, event, threshCriterion)
 
 #m <- 
-ggplot(adcp_event, aes(x = date_time, y=temp_adcp, color=threshCriterion, group=factor(c(0, cumsum(abs(head(threshCriterion, -1) != tail(threshCriterion, -1))))))) +
+image <- ggplot(adcp_event, aes(x = date_time, y=temp_adcp, color=threshCriterion, group=factor(c(0, cumsum(abs(head(threshCriterion, -1) != tail(threshCriterion, -1))))))) +
   geom_line(aes(linetype=threshCriterion), alpha=0.9, size=0.7) +
   scale_x_datetime(date_labels = "%b %d",
                    breaks = scales::date_breaks("1 week"),
@@ -247,15 +253,21 @@ ggplot(adcp_event, aes(x = date_time, y=temp_adcp, color=threshCriterion, group=
                       labels= c("No", "Yes")) +
   labs(y = expression(paste("Temperature (", degree, "C)")),
        x = "Date",
-       color = "Marine heatwave threshold") +
+       color = "Marine heatwave threshold  ") +
+       #title = "B") +
   theme_bw() +
-  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=14),
-        axis.text.y=element_text(size=14),
-        axis.title.x=element_text(size=18),
-        axis.title.y=element_text(size=18),
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=18),
+        axis.text.y=element_text(size=18),
+        axis.title.x=element_text(size=20),
+        axis.title.y=element_text(size=20),
+        #make legend text bigger
+        legend.text=element_text(size=16),
+        legend.title=element_text(size=18),
         legend.position="top")
+        #plot.title = element_text(size=40))
 
 #ggsave(here("experiment", "figures", "mhw_month.png"), width=12, height=6) #or width = 8
+#ggsave(file = here("experiment", "figures", "methodsPub","Fig1B.svg"), plot = image, width=12, height=6.2)
 ```
 
 #Plot the different timeframes together
