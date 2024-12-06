@@ -74,6 +74,17 @@ for (tank in 1:15) {
 }
 ```
 
+C matrix needs to be edited - all numeric matrix, ends up with 1 column - YES
+c matrix = temp_cov
+B = Identity, random walk - YES
+Z = CUSTOM matrix, this is your MEAT - YES
+A = A_matrix?
+R = identity?
+U = unequal?
+Q = diangonal and equal?
+```{r}
+
+```
 
 ```{r}
 C <- C_matrix #but try this with diagonal and unequal...
