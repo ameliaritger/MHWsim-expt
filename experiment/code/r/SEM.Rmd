@@ -1,5 +1,5 @@
 ---
-title: "SEM"
+title: "SEM for Corynactis MHWsim experiment"
 author: "Sam Bogan"
 date: "2024-12-09"
 output: html_document
@@ -7,14 +7,24 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-
 library(brms)
-
+library(tidyverse)
 ```
-Wrangle data
 
+# Load Tidied Data
 ```{r}
+# Run these two lines ONE TIME to load temperature/body size data, then save the file to your local machine
+#source("readRPiData.R", local = knitr::knit_global())
+#source("readBodySizeData.R", local = knitr::knit_global())
 
+source("mergeAllData.R", local = knitr::knit_global())
+rpi_temp <- read_csv(here("experiment", "data", "rpi_temp.csv"))
+weekly_temp <- read_csv(here("experiment", "data", "weekly_temperature.csv"))
+daily_temp <- read_csv(here("experiment", "data", "three_day_temperature.csv"))
+```
+
+# Wrangle data
+```{r}
 all$tank_date <- paste(all$tank, all$date, sep = "_")
 temp_clean$tank_date <- paste(temp_clean$tank, temp_clean$date, sep = "_")
 
@@ -25,13 +35,10 @@ all_temp <- merge(all,
 
 all_temp <- all_temp %>% 
   mutate(date_num = as.numeric(date - as.Date("2023-10-01")))
-
 ```
 
-Bayes SEM
-
+# Bayes SEM
 ```{r}
-
 # First pass non time-series, Bayesian model
 sem1_rand <- brm(
   bf(scale(avg_biomass_g) ~ scale(n_true) + scale(temp) + scale(percent_open)) +
@@ -45,13 +52,10 @@ sem1_rand <- brm(
 )
 
 summary(sem1_rand)
-
 ```
 
-Frequentist SEM
-
+# Frequentist SEM
 ```{r}
-
 # Lavaan
 
 ```
