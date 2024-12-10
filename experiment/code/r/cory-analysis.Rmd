@@ -170,9 +170,9 @@ date_plot <- c(rep("2023-10-01", 15), rep("2024-01-10", 15))
 
 p <- ggplot(all, aes(x=date, y=growth_rate_cont, color=genet, shape=mhw)) +
   geom_point(alpha=0.15) +
-  facet_wrap(~factor(treatment, levels=c("cold", "severe", "extreme"), labels=c("Ambient", "Severe MHW", "Extreme MHW"))) +   geom_rect(aes(xmin = as.POSIXct("2023-11-30"), xmax = as.POSIXct("2023-12-10"), ymin = -5, ymax = -4.5), color = "dimgray", fill = "dimgray", alpha = 0.4) +  # Add horizontal bar
-    geom_rect(aes(xmin = as.POSIXct("2024-02-14"), xmax = as.POSIXct("2024-02-21"), ymin = -5, ymax = -4.5), color = "dimgray", fill = "dimgray", alpha = 0.4) +  # Add horizontal bar
-  geom_vline(xintercept = as.POSIXct("2023-12-10"), linetype = "dashed") +  # Add vertical line delineating during/after MHW
+  facet_wrap(~factor(treatment, levels=c("cold", "severe", "extreme"), labels=c("Ambient", "Severe MHW", "Extreme MHW"))) +   geom_rect(aes(xmin = as.Date("2023-11-30"), xmax = as.Date("2023-12-10"), ymin = -5, ymax = -4.5), color = "dimgray", fill = "dimgray", alpha = 0.4) +  # Add horizontal bar
+    geom_rect(aes(xmin = as.Date("2024-02-14"), xmax = as.Date("2024-02-21"), ymin = -5, ymax = -4.5), color = "dimgray", fill = "dimgray", alpha = 0.4) +  # Add horizontal bar
+  geom_vline(xintercept = as.Date("2023-12-10"), linetype = "dashed") +  # Add vertical line delineating during/after MHW
   geom_smooth(method = "lm", se = FALSE) +
   #stat_poly_eq(use_label("eq"), formula = y ~ x, parse = TRUE) +  #un-comment this to get updated values to add to label_plot
   scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
@@ -203,9 +203,9 @@ p
 g <- ggplot(all, aes(x=date, y=n_true, color=genet, shape=mhw)) +
   geom_point(alpha=0.15) +
   facet_wrap(~factor(treatment, levels=c("cold", "severe", "extreme"), labels=c("Ambient", "Severe MHW", "Extreme MHW"))) +
-  geom_rect(aes(xmin = as.POSIXct("2023-11-30"), xmax = as.POSIXct("2023-12-10"), ymin = 5, ymax = 5.5), color = "dimgray", fill = "dimgray", alpha = 0.2) +  # Add horizontal bar
-  geom_rect(aes(xmin = as.POSIXct("2024-02-14"), xmax = as.POSIXct("2024-02-21"), ymin = 5, ymax = 5.5), color = "dimgray", fill = "dimgray", alpha = 0.2) +  # Add horizontal bar
-  geom_vline(xintercept = as.POSIXct("2023-12-10"), linetype = "dashed", linewidth = 0.5) +  # Add vertical line delineating during/after MHW
+  geom_rect(aes(xmin = as.Date("2023-11-30"), xmax = as.Date("2023-12-10"), ymin = 5, ymax = 5.5), color = "dimgray", fill = "dimgray", alpha = 0.2) +  # Add horizontal bar
+  geom_rect(aes(xmin = as.Date("2024-02-14"), xmax = as.Date("2024-02-21"), ymin = 5, ymax = 5.5), color = "dimgray", fill = "dimgray", alpha = 0.2) +  # Add horizontal bar
+  geom_vline(xintercept = as.Date("2023-12-10"), linetype = "dashed", linewidth = 0.5) +  # Add vertical line delineating during/after MHW
   geom_smooth(method = "lm", se = FALSE) +
  # stat_poly_eq(use_label("eq"), formula = y ~ x, parse = TRUE) +  
   scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
