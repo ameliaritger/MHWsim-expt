@@ -14,19 +14,20 @@ library(MARSS)
 ## Load data
 ```{r}
 source("mergeAllData.R", local = knitr::knit_global())
-#Load temperature data AFTER you have run source(ReadRPiData)
+#source("readRPiData.R", local = knitr::knit_global())
+# Load temperature data AFTER you have uncommented and run source(ReadRPiData)
 weekly_temp <- read_csv(here("experiment", "data", "weekly_temperature.csv"))
 ```
 
 ## Prep data
 ```{r}
-all_size <- all %>%
-  filter(!is.na(avg_size)) %>%
-  mutate(avg_size_log = log(avg_size)) %>%
-  group_by(tank, genet) %>%
-  mutate(avg_size_diff = avg_size_log - lag(avg_size_log),
-         avg_size_diff2 = avg_size_diff - lag(avg_size_diff)) %>%
-  ungroup()
+#all_size <- all %>%
+#  filter(!is.na(avg_size)) %>%
+#  mutate(avg_size_log = log(avg_size)) %>%
+#  group_by(tank, genet) %>%
+#  mutate(avg_size_diff = avg_size_log - lag(avg_size_log),
+#         avg_size_diff2 = avg_size_diff - lag(avg_size_diff)) %>%
+#  ungroup()
 
 all_size_marss <- all %>%
   filter(!is.na(avg_size)) %>%
@@ -37,17 +38,23 @@ all_size_marss <- all %>%
   select(date, week, tank, mhw, genet, avg_size_log) %>%
   left_join(weekly_temp, by = c("date" = "friday", "tank"))
 
-marss_data <- all_size_marss %>%
-  mutate(genet_tank = paste(genet, tank, sep = "_"))
-
-marss_data_wide <- marss_data %>%
+marss_data_wide <- all_size_marss %>%
+  mutate(genet_tank = paste(genet, tank, sep = "_")) %>%
   select(-date, -tank, -genet, -mhw, -treatment, -avg_temp, -min_temp, -max_temp) %>%
   pivot_wider(names_from = genet_tank, values_from = avg_size_log) %>%
   column_to_rownames(var = "week") %>%
   as.matrix() %>%
   t()
+```
 
-temp_cov <- weekly_temp %>%
+## Make A matrix - genet ID
+```{r}
+A_matrix <- matrix(rep(c("A", "B", "C", "D", "E"), times = 15), nrow = 75, ncol = 1)
+```
+
+## Make C, c matrices - temperature covariate
+```{r}
+temp_covariate <- weekly_temp %>%
   filter(friday < ymd("2024-02-16")) %>%
   arrange(friday, tank) %>%
   slice(rep(1:n(), each = 5)) %>%
@@ -60,36 +67,169 @@ temp_cov <- weekly_temp %>%
   as.matrix() %>%
   t()
 
-# Make blank temperature covariate interaction matrix
-C_matrix <- matrix(0, nrow = 75, ncol = 75)
-#Fill in interaction matrix
-for (tank in 1:15) {
-  start_row <- (tank - 1) * 5 + 1
-  end_row <- start_row + 4  # 5 genotypes per tank
-  for (i in start_row:end_row) {
-    for (j in start_row:end_row) {
-      C_matrix[i, j] <- tank
-    }
-  }
+C_matrix <- matrix(factor(rep(1:15, each = 5)), ncol = 1)
+```
+
+## Make Z matrix list - your hypotheses. Need to incorporate that # cols = # treatments, because then I need to change C matrix dimensions and resolve underconstrained issues with Z, B matrices
+```{r}
+Z_models <- list(
+  H1 = matrix(factor(rep(1, 75))),
+  H2 = matrix(factor(c(rep("amb", 25), rep("sev", 25), rep("ext", 25)))),
+  H3 = matrix(factor(rep(c("A", "B", "C", "D", "E"), times = 15))),
+  H4 = matrix(factor(c(rep("amb", 25), rep("mhw", 50)))),
+  H5 = matrix(factor(c(rep("amb", 25), rep("sev", 25), rep("amb", 25)))), # post-hoc hypothesis
+  H6 = matrix(factor(rep(c("gen1", "gen2", "gen2", "gen2", "gen1"), times = 15))), # post-hoc hypothesis
+  H7 = matrix(factor(rep(c("gen1", "gen2", "gen3", "gen4", "gen1"), times = 15)))#, # post-hoc hypothesis
+  #H8 = matrix(factor(1:75)) #DO NOT USE! Overfits the data and has worst AIC 
+  )
+
+names(Z_models) <- c("all_same", "diff_treat", "diff_genet", "mhw_same", "amb_ext_same", "AE_BCD", "AE_B_C_D") #, "all_diff")
+```
+
+C matrix needs to be edited - all numeric matrix, ends up with 1 column
+c matrix = temp_cov
+B = Identity, random walk
+Z = CUSTOM matrix, this is your MEAT
+A = A_matrix?
+R = diagonal and equal #identity?
+U = unequal?
+Q = diagonal and equal?
+
+```{r}
+mod_list <- list(
+  B = "identity", #pretty sure this is right
+  U = "zero", #unequal has worse AIC/BIC
+  Q = "diagonal and equal", #All tanks have same mixing; random walk diagonal and unequal has worse AIC/BIC
+  Z = "placeholder",
+  A = A_matrix,
+  R = "diagonal and equal", #errors are independent and equally distributed
+  C = C_matrix,
+  c = temp_covariate)
+```
+
+Loop through Z matrix models 
+```{r}
+out.tab <- NULL
+fits <- list()
+for (i in 1:length(Z_models)) {
+    mod_list$Z <- Z_models[[i]]
+    fit <- MARSS(y=marss_data_wide, model = mod_list, silent = TRUE, 
+        control = list(maxit = 5000))
+    out <- data.frame(H = names(Z_models)[i], logLik = fit$logLik, 
+        AICc = fit$AICc, num.param = fit$num.params, m = length(unique(Z_models[[i]])), 
+        num.iter = fit$numIter, converged = !fit$convergence)
+    out.tab <- rbind(out.tab, out)
+    fits <- c(fits, list(fit))
 }
 ```
 
-C matrix needs to be edited - all numeric matrix, ends up with 1 column - YES
-c matrix = temp_cov
-B = Identity, random walk - YES
-Z = CUSTOM matrix, this is your MEAT - YES
-A = A_matrix?
-R = identity?
-U = unequal?
-Q = diangonal and equal?
+## Experiment with non 75x1 Z matrix dimensions
 ```{r}
+#Each treatment different
+Z_matrix2 <- matrix(factor(c(rep(c(1, 0, 0), 25),
+                            rep(c(0, 1, 0), 25),
+                            rep(c(0, 0, 1), 25))),
+                   nrow = 75, byrow = TRUE)
 
+# Create the Z_matrix where the 1 moves over 1 position every 5 rows
+#Z_matrix2 <- matrix(0, nrow = 75, ncol = 15)  # Initialize a 75x15 matrix of zeros
+#for (i in 1:15) {
+#  Z_matrix2[((i-1)*5 + 1):(i*5), i] <- 1  # Set the 'i-th' column to 1 for rows 5*i-4 to 5*i
+#}
+#Z_matrix2 <- matrix(factor(Z_matrix2), nrow = 75, ncol = 15)
+
+# Combine the blocks into a single 75x3 matrix
+matrix_data <- rbind(matrix(c(rep(1:5, each = 5), rep(0, 25), rep(0, 25)), nrow = 25, ncol = 3, byrow = FALSE),
+                     matrix(c(rep(0, 25), rep(6:10, each = 5), rep(0, 25)), nrow = 25, ncol = 3, byrow = FALSE),
+                     matrix(c(rep(0, 25), rep(0, 25), rep(10:14, each = 5)), nrow = 25, ncol = 3, byrow = FALSE))
+
+C_matrix2 <- matrix(factor(rep(1:15, each = 5)), ncol = 3)
+
+C_matrix2 <- matrix(0, nrow = 75, ncol = 3)
+for (i in 1:3) {
+  C_matrix2[((i-1)*5 + 1):(i*5), i] <- 1  # Set the 'i-th' column to 1 for rows 5*i-4 to 5*i
+}
+C_matrix2 <- matrix(factor(C_matrix2), nrow = 75, ncol = 3)
+
+model_list <- list(
+  B = "identity", #pretty sure this is right, random walk diagonal and unequal has worse AIC/BIC
+  U = "zero", #unequal has worse AIC/BIC
+  Q = "diagonal and equal", #All tanks have same mixing; random walk diagonal and unequal has worse AIC/BIC
+  Z = Z_matrix2,
+  A = A_matrix,
+  R = "diagonal and equal", #errors are independent and equally distributed
+  C = matrix_data,
+  c = temp_covariate)
+
+fit1 <- MARSS(y=marss_data_wide, model = model_list,
+              control = list(maxit = 1000))
 ```
 
+# Generate the z-scored data
 ```{r}
-C <- C_matrix #but try this with diagonal and unequal...
-c <- temp_cov
+the.mean <- apply(marss_data_wide, 1, mean)
+the.sigma <- sqrt(apply(marss_data_wide, 1, var))
+marss_data_wide_z <- (marss_data_wide - the.mean) * (1/the.sigma)
 
-fit <- MARSS(marss_data_wide, model = list(C=C, c=c))
+the.mean <- apply(temp_covariate, 1, mean)
+the.sigma <- sqrt(apply(temp_covariate, 1, var))
+temp_covariate_z <- (temp_covariate - the.mean) * (1/the.sigma)
+```
+
+## Model the z-scored data
+```{r}
+mod_list_z <- list(
+  B = "diagonal and equal", #identity is another option, but models have lower logLik and higher AICc; random walk diagonal and unequal gives exact same
+  U = "unequal", #unequal has worse AIC/BIC
+  Q = "diagonal and equal", #All tanks have same mixing (also, random walk diagonal and unequal is the same AICc and very close Q estimates)
+  Z = "placeholder",
+  A = "zero", #because data have been z-scored
+  R = "diagonal and equal", #observation errors are independent and have equal variances, because there was only ONE sampler (me)
+  C = C_matrix,
+  c = temp_covariate_z)
+#x0 = "zero"?
+
+out_tab_z <- NULL
+fits_z <- list()
+for (i in 1:length(Z_models)) {
+    mod_list_z$Z <- Z_models[[i]]
+    
+    fit <- MARSS(y=marss_data_wide_z, model = mod_list_z, silent = TRUE, 
+        control = list(maxit = 5000))
+    
+    #print(fit)
+    out <- data.frame(H = names(Z_models)[i], logLik = fit$logLik, 
+        AICc = fit$AICc, num.param = fit$num.params, m = length(unique(Z_models[[i]])), 
+        num.iter = fit$numIter, converged = !fit$convergence)
+    
+    out_tab_z <- rbind(out_tab_z, out)
+    
+    fits_z <- c(fits_z, list(fit))
+}
+```
+
+According to AICc (and logLik), definitely don't use all_diff and can probably also rule out diff_genet
+
+## Visualize z-scored temperatures
+```{r}
+temp_z <- weekly_temp %>%
+  filter(friday < ymd("2024-02-16")) %>%
+  arrange(friday, tank) %>%
+  select(tank, friday, avg_temp) %>%
+  group_by(tank) %>%
+  mutate(avg_temp_z = (avg_temp - mean(avg_temp, na.rm = TRUE)) /sd(avg_temp, na.rm = TRUE),
+         treatment = ifelse(tank < 6, "ambient",
+                            ifelse(tank > 10, "extreme",
+                                   "severe")),
+         tank = as.factor(tank)) %>%
+  ungroup()
+
+ggplot(temp_z, aes(x = friday, y = avg_temp_z, color = tank)) +
+  geom_line() +
+  labs(title = "Z-scored average temperature by tank",
+       x = "Date",
+       y = "Z-scored average temperature") +
+  theme_minimal() +
+  facet_wrap(~treatment)
 ```
 
