@@ -181,7 +181,7 @@ temp_covariate_z <- (temp_covariate - the.mean) * (1/the.sigma)
 ```{r}
 mod_list_z <- list(
   B = "diagonal and equal", #identity is another option, but models have lower logLik and higher AICc; random walk diagonal and unequal gives same model output
-  U = "unequal", #or unequal/zero
+  U = "zero", #or unequal - which I am currently running, check that.
   Q = "diagonal and equal", #All tanks have same mixing (also, random walk diagonal and unequal is the same AICc and very close Q estimates)
   Z = "placeholder",
   A = "zero", #because data have been z-scored
