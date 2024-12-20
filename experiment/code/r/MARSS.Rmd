@@ -40,12 +40,12 @@ marss_data_wide <- all_size_marss %>%
 
 # Make matrices
 
-## Make A matrix - genet ID
+## Make A matrix - genet ID (Five genets: A, B, C, D, E)
 ```{r}
 A_matrix <- matrix(rep(c("A", "B", "C", "D", "E"), times = 15), nrow = 75, ncol = 1)
 ```
 
-## Make C, c matrices - temperature covariate
+## Make C, c matrices - temperature covariate (15 tanks, 5 genets in each tank)
 ```{r}
 temp_covariate <- weekly_temp %>%
   filter(friday < ymd("2024-02-16")) %>%
@@ -181,7 +181,7 @@ temp_covariate_z <- (temp_covariate - the.mean) * (1/the.sigma)
 ```{r}
 mod_list_z <- list(
   B = "diagonal and equal", #identity is another option, but models have lower logLik and higher AICc; random walk diagonal and unequal gives same model output
-  U = "zero", #unequal doesn't converge even after 5k iterations
+  U = "zero", #note: unequal doesn't converge even after 5k iterations
   Q = "diagonal and equal", #All tanks have same mixing (also, random walk diagonal and unequal is the same AICc and very close Q estimates)
   Z = "placeholder",
   A = "zero", #because data have been z-scored
