@@ -26,6 +26,8 @@ all_temp <- merge(all,
 all_temp <- all_temp %>% 
   mutate(date_num = as.numeric(date - as.Date("2023-10-01")))
 
+all_temp$genet <- as.numeric(all_temp$genet)
+
 ```
 
 Bayes SEM
@@ -52,7 +54,22 @@ Frequentist SEM
 
 ```{r}
 
-# Lavaan
+sem1_freq <- '
+  # Regressions
+  avg_biomass_g ~ n_true + temp + percent_open
+  n_true ~ temp + genet
+  percent_open ~ temp
+  
+  # Covariances
+  genet ~~ genet # random effect for genet (variance only)
+'
+
+# Fit the model
+fit <- sem(sem1_freq, data = all_temp)
+
+# Show the summary of the fit
+summary(fit, fit.measures = TRUE)
 
 ```
+
 
