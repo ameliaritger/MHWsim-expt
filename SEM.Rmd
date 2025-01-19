@@ -54,11 +54,16 @@ Frequentist SEM
 
 ```{r}
 
+all_temp$sc_avg_biomass_g <- scale(all_temp$avg_biomass_g)
+all_temp$sc_n_true <- scale(all_temp$n_true)
+all_temp$sc_temp <- scale(all_temp$temp)
+all_temp$sc_percent_open <- scale(all_temp$percent_open)
+
 sem1_freq <- '
   # Regressions
-  avg_biomass_g ~ n_true + temp + percent_open
-  n_true ~ temp + genet
-  percent_open ~ temp
+  sc_avg_biomass_g ~ sc_n_true + sc_temp + sc_percent_open
+  sc_n_true ~ sc_temp + genet
+  sc_percent_open ~ sc_temp
   
   # Covariances
   genet ~~ genet # random effect for genet (variance only)
