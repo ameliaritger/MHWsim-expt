@@ -1,0 +1,80 @@
+---
+title: "SEM"
+author: "Sam Bogan"
+date: "2024-12-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(brms)
+
+```
+Wrangle data
+
+```{r}
+
+all$tank_date <- paste(all$tank, all$date, sep = "_")
+temp_clean$tank_date <- paste(temp_clean$tank, temp_clean$date, sep = "_")
+
+all_temp <- merge(all,
+                  data.frame(temp = temp_clean$avg_temp,
+                             tank_date = temp_clean$tank_date),
+                  by = "tank_date")
+
+all_temp <- all_temp %>% 
+  mutate(date_num = as.numeric(date - as.Date("2023-10-01")))
+
+all_temp$genet <- as.numeric(all_temp$genet)
+
+```
+
+Bayes SEM
+
+```{r}
+
+# First pass non time-series, Bayesian model
+sem1_rand <- brm(
+  bf(scale(avg_biomass_g) ~ scale(n_true) + scale(temp) + scale(percent_open)) +
+    bf(scale(n_true) ~ scale(temp) + (1|genet)) +
+    bf(scale(percent_open) ~ scale(temp)) + # Pressure is gaussian
+    set_rescor(rescor = FALSE), # Temp is gaussian 
+  data = all_temp,
+  family = gaussian(), # Variance family for count data w/ zeros
+  chains = 4, iter = 10000,
+  save_pars = save_pars(all = TRUE)
+)
+
+summary(sem1_rand)
+
+```
+
+Frequentist SEM
+
+```{r}
+
+all_temp$sc_avg_biomass_g <- scale(all_temp$avg_biomass_g)
+all_temp$sc_n_true <- scale(all_temp$n_true)
+all_temp$sc_temp <- scale(all_temp$temp)
+all_temp$sc_percent_open <- scale(all_temp$percent_open)
+
+sem1_freq <- '
+  # Regressions
+  sc_avg_biomass_g ~ sc_n_true + sc_temp + sc_percent_open
+  sc_n_true ~ sc_temp + genet
+  sc_percent_open ~ sc_temp
+  
+  # Covariances
+  genet ~~ genet # random effect for genet (variance only)
+'
+
+# Fit the model
+fit <- sem(sem1_freq, data = all_temp)
+
+# Show the summary of the fit
+summary(fit, fit.measures = TRUE)
+
+```
+
+
