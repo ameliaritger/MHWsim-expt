@@ -20,9 +20,9 @@ library(chron) #convert decimal time
 library(EDIutils) #to download LTER data
 library(xml2) #to open LTER xlsx data
 
-#source(here("experiment", "code", "r", "read_sbc_data.r"))
-#dt <- read.csv(here("experiment", "data", "vw_timeseries_entities.csv") ,stringsAsFactors = FALSE)
-#dsname <- "Moored CTD and ADCP: NAP - Moored CTD and ADCP at Naples Reef NAP"
+source(here("experiment", "code", "r", "read_sbc_data.r"))
+dt <- read.csv(here("experiment", "data", "vw_timeseries_entities.csv") ,stringsAsFactors = FALSE)
+dsname <- "Moored CTD and ADCP: NAP - Moored CTD and ADCP at Naples Reef NAP"
 ```
 
 Moored CTD and ADCP: ARQ - Moored CTD and ADCP at Arroyo Quemado Reef ARQ
@@ -32,9 +32,9 @@ Moored CTD and ADCP: NAP - Moored CTD and ADCP at Naples Reef NAP
 
 #Load data
 ```{r}
-#raw_temp <-  read_sbc_data(dsname) %>%
-#  select(year, month, day,  decimal_time, Temp_adcp, Temp_top, Temp_mid, Temp_bot,  ADCP_depth) %>%
-#  clean_names()
+raw_temp <-  read_sbc_data(dsname) %>%
+  select(year, month, day,  decimal_time, Temp_adcp, Temp_top, Temp_mid, Temp_bot,  ADCP_depth) %>%
+  clean_names()
 ```
 
 #Clean up the data
@@ -386,7 +386,7 @@ ggplot(mhw_subset_comb, aes(x = date_time)) +
         legend.position="top",
         legend.title = element_blank())
 
-ggsave(here("experiment", "figures", "WSN", "BlobTemps_severe.png"), width = 12, height = 7)
+#ggsave(here("experiment", "figures", "WSN", "BlobTemps_severe.png"), width = 12, height = 7)
 ```
 
 #Decide what value of C for "chilled" treatment
@@ -436,7 +436,7 @@ mhw_profile <- temp_clean %>% #or use "all_data"
   mutate(t=date(date_time))
 
 # save mhw_profile as .csv file using read_csv
-write_csv(mhw_profile, here("experiment", "data", "2015mhw_profile.csv"))
+#write_csv(mhw_profile, here("experiment", "data", "2015mhw_profile.csv"))
 
 #mhw_profile <- nap_clean %>%
 #    filter(date>=ymd("2015-08-15") & date<ymd("2016-03-01")) %>%
@@ -520,7 +520,7 @@ ggplot(fake_temp, aes(x=date_time, y=temp)) +
 
 
 # Combine time and temperature into a dataframe
-write_csv(fake_temp, here("experiment", "data", "fake_data.csv"))
+#write_csv(fake_temp, here("experiment", "data", "fake_data.csv"))
 ```
 
 # Extract the seasonal climatology data
