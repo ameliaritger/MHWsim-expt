@@ -41,6 +41,8 @@ temp_covariate <- weekly_temp %>%
   t()
 
 C_matrix <- matrix(factor(rep(1:15, each = 5)), ncol = 1)
+
+#3x15 matrix
 ```
 
 ## Make Z matrix list. Might need to incorporate that # cols = # treatments, because then I need to change C matrix dimensions and resolve underconstrained issues with Z, B matrices
@@ -86,10 +88,10 @@ names(Z_models) <- c("all_same", "diff_treat", "diff_genet", "mhw_same", "amb_ex
 ```{r}
 mod_list <- list(
   B = "identity", #pretty sure this is right, random walk diagonal and unequal has worse AIC/BIC
-  U = "zero", #unequal has worse AIC/BIC
+  U = "zero", #unequal has worse AIC/BIC -  [[ONLY WORKS IF Z SCORE DATA]]
   Q = "diagonal and equal", #All tanks have same mixing; random walk diagonal and unequal has worse AIC/BIC
   Z = "placeholder",
-  A = A_matrix,
+  A = A_matrix, # SET TO ZERO
   R = "diagonal and equal", #errors are independent and equally distributed
   C = C_matrix,
   c = temp_covariate)
