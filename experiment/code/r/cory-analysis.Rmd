@@ -53,6 +53,11 @@ all_size <- all %>%
   mutate(avg_size_diff = avg_size_log - lag(avg_size_log),
          avg_size_diff2 = avg_size_diff - lag(avg_size_diff)) %>%
   ungroup()
+
+#all_sum <- all_size %>%
+#  filter(date == ymd("2023-10-06")) %>%
+#  group_by(genet, treatment) %>%
+#  summarize(n = sum(n))
 ```
 
 # Count max/total number of polyps
