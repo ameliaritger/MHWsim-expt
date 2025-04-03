@@ -30,17 +30,17 @@ A_matrix <- matrix(rep(c("A", "B", "C", "D", "E"), times = 15), nrow = 75, ncol 
 temp_covariate <- weekly_temp %>%
   filter(friday < ymd("2024-02-16")) %>%
   arrange(friday, tank) %>%
-  slice(rep(1:n(), each = 5)) %>%
-  mutate(tank_rep = paste0(tank, letters[1:5][rep(1:5, times = n()/5)])) %>%
-  select(tank_rep, friday, avg_temp) %>%
-  pivot_wider(names_from = tank_rep, values_from = avg_temp) %>%
+  #slice(rep(1:n(), each = 5)) %>%
+  #mutate(tank_rep = paste0(tank, letters[1:5][rep(1:5, times = n()/5)])) %>%
+  select(tank, friday, avg_temp) %>%
+  pivot_wider(names_from = tank, values_from = avg_temp) %>%
   mutate(week = row_number()) %>%
   select(-friday) %>%
   column_to_rownames(var = "week") %>%
   as.matrix() %>%
   t()
 
-C_matrix <- matrix(factor(rep(1:15, each = 5)), ncol = 1)
+C_matrix <- matrix(factor(paste("tank", rep(1:15, each = 5), sep = "")), ncol = 1)
 
 #3x15 matrix
 ```
@@ -84,15 +84,23 @@ names(Z_models) <- c("all_same", "diff_treat", "diff_genet", "mhw_same", "amb_ex
 - U = unequal?
 - Q = diagonal and equal?
 
+#### -------------- My old OG MARSS model with notes:
+- B = "identity", #pretty sure this is right. Could also be diagonal and unequal or diagonal and equal though.
+- U = "zero", #unequal has worse AIC/BIC -  [[ONLY WORKS IF Z SCORE DATA]]
+- Q = "diagonal and equal", #All tanks have same mixing (but are not correlated, hence diagonal); random walk diagonal and unequal has worse AIC/BIC (and that would mean diff mixing between tanks - but check this with "new" model)
+- Z = "placeholder",
+- A = "zero", # SET TO ZERO! (according to Robert)
+- R = "diagonal and equal", #observation errors are independent and equally distributed!
+
 ## Set up model list
 ```{r}
 mod_list <- list(
-  B = "identity", #pretty sure this is right, random walk diagonal and unequal has worse AIC/BIC
-  U = "zero", #unequal has worse AIC/BIC -  [[ONLY WORKS IF Z SCORE DATA]]
-  Q = "diagonal and equal", #All tanks have same mixing; random walk diagonal and unequal has worse AIC/BIC
+  B = "identity", #MAYBE diagonal and equal or diagonal and unequal
+  U = "unequal",
+  Q = "diagonal and equal", #MAYBE diagonal and unequal if tank mixing diff
   Z = "placeholder",
-  A = A_matrix, # SET TO ZERO
-  R = "diagonal and equal", #errors are independent and equally distributed
+  A = "zero",
+  R = "diagonal and equal",
   C = C_matrix,
   c = temp_covariate)
 ```
