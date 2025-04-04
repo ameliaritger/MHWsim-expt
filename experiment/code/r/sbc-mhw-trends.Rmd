@@ -20,9 +20,9 @@ library(chron) #convert decimal time
 library(EDIutils) #to download LTER data
 library(xml2) #to open LTER xlsx data
 
-source(here("experiment", "code", "r", "read_sbc_data.r"))
-dt <- read.csv(here("experiment", "data", "vw_timeseries_entities.csv") ,stringsAsFactors = FALSE)
-dsname <- "Moored CTD and ADCP: NAP - Moored CTD and ADCP at Naples Reef NAP"
+#source(here("experiment", "code", "r", "read_sbc_data.r"))
+#dt <- read.csv(here("experiment", "data", "vw_timeseries_entities.csv") ,stringsAsFactors = FALSE)
+#dsname <- "Moored CTD and ADCP: NAP - Moored CTD and ADCP at Naples Reef NAP"
 ```
 
 Moored CTD and ADCP: ARQ - Moored CTD and ADCP at Arroyo Quemado Reef ARQ
@@ -32,7 +32,7 @@ Moored CTD and ADCP: NAP - Moored CTD and ADCP at Naples Reef NAP
 
 #Load data
 ```{r}
-raw_temp <-  read_sbc_data(dsname) %>%
+raw_temp <- read_csv(here("experiment", "data", "naples_mooring_nap_20250117.csv")) %>%
   select(year, month, day,  decimal_time, Temp_adcp, Temp_top, Temp_mid, Temp_bot,  ADCP_depth) %>%
   clean_names()
 ```
@@ -133,10 +133,10 @@ mhw_event <- mhw$event %>%
   filter(date_start > ymd(decade_time)) %>% #Only look at MHWs in the last decade
   mutate(month_start=month(date_start),
          month_end=month(date_end)) %>%
-  filter(between(month_start,1,2) | between(month_start,8,12)) %>% #CHECK MANUALLY BEFORE FILTERING, make sure there aren't long duration MHWs that started in June/July and extended well into August and beyond
+  #filter(between(month_start,1,2) | between(month_start,8,12)) %>% #CHECK MANUALLY BEFORE FILTERING, make sure there aren't long duration MHWs that started in June/July and extended well into August and beyond
   dplyr::arrange(-duration) %>%
-  select(1:12) %>%
-  filter(date_start < ymd("2017-01-01") & date_end > ymd("2014-06-01"))
+  #select(1:12) %>%
+  #filter(date_start < ymd("2017-01-01") & date_end > ymd("2014-06-01"))
 
 nap_event <- mhw_event
 #write_csv(mhw_event, here("tables", "mohawk_mhw_all.csv"))
