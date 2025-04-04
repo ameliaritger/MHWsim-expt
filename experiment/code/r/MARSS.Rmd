@@ -22,7 +22,7 @@ weekly_temp <- read_csv(here("experiment", "data", "weekly_temperature.csv"))
 
 ## Make A matrix - genet ID (Five genets: A, B, C, D, E)
 ```{r}
-A_matrix <- matrix(rep(c("A", "B", "C", "D", "E"), times = 15), nrow = 75, ncol = 1)
+#A_matrix <- matrix(rep(c("A", "B", "C", "D", "E"), times = 15), nrow = 75, ncol = 1)
 ```
 
 ## Make C, c matrices - temperature covariate (15 tanks, 5 genets in each tank)
@@ -40,8 +40,7 @@ temp_covariate <- weekly_temp %>%
   as.matrix() %>%
   t()
 
-C_matrix <- matrix(factor(paste("tank", rep(1:15, each = 5), sep = "")), ncol = 1)
-
+C_matrix <- matrix(factor(paste("tank", rep(1:15, each = 1), sep = "")), ncol = 1)
 #3x15 matrix
 ```
 
@@ -57,10 +56,11 @@ Z_models <- list(
   H7 = matrix(factor(rep(c("gen1", "gen2", "gen3", "gen4", "gen1"), 15))), # post-hoc hypothesis
   H8 = matrix(factor(c(rep(c("amb_gen1", "amb_gen2", "amb_gen2", "amb_gen2", "amb_gen1"), 5),
                      rep(c("sev_gen1", "sev_gen2", "sev_gen2", "sev_gen2", "sev_gen1"),5),
-                     rep(c("amb_gen1", "amb_gen2", "amb_gen2", "amb_gen2", "amb_gen1"), 5))))) # post-hoc hypothesis
+                     rep(c("amb_gen1", "amb_gen2", "amb_gen2", "amb_gen2", "amb_gen1"), 5)))))
+  #H10 = matrix(factor(rep(c("heatwave", "recovery"), each = 12)))) # post-hoc hypothesis
   #H9 = matrix(factor(1:75)) #Do not use! Overfits the data and has by far the worst AIC 
 
-names(Z_models) <- c("all_same", "diff_treat", "diff_genet", "mhw_same", "amb_ext_same", "AE_BCD", "AE_B_C_D", "ambExt_AE_BCD") #, "all_diff")
+names(Z_models) <- c("all_same", "diff_treat", "diff_genet", "mhw_same", "amb_ext_same", "AE_BCD", "AE_B_C_D", "ambExt_AE_BCD") #, "heatwave_recovery") #, "all_diff")
 ```
 
 #### Hypotheses
@@ -73,6 +73,7 @@ names(Z_models) <- c("all_same", "diff_treat", "diff_genet", "mhw_same", "amb_ex
 - H7: All treatments are the same, and genets A/E are the same (post-hoc hypothesis, alternative to H6)
 - H8: The exterme MHW is the same as the control treatment, and genets A/E are the same and genets B/C/D are the same (post-hoc hypothesis, alternative to H5:H8)
 - H9: (Do not use!) All genets and all treatments are different
+- H10: The heatwave period was different from the recovery period 
 
 #### -------------- Notes from WSN 2024:
 - C matrix - all numeric matrix, 1 column -> This doesn't work though, and needs to be same dimensions as c matrix
@@ -95,9 +96,9 @@ names(Z_models) <- c("all_same", "diff_treat", "diff_genet", "mhw_same", "amb_ex
 ## Set up model list
 ```{r}
 mod_list <- list(
-  B = "identity", #MAYBE diagonal and equal or diagonal and unequal
+  B = "identity", #MAYBE diagonal and equal or diagonal and unequal because body growth over time is autocorrelated, however both these options don't converge
   U = "unequal",
-  Q = "diagonal and equal", #MAYBE diagonal and unequal if tank mixing diff
+  Q = "diagonal and equal", #MAYBE diagonal and unequal if water mixing in each tank is different (but unlikely)
   Z = "placeholder",
   A = "zero",
   R = "diagonal and equal",
@@ -127,6 +128,34 @@ all_size_marss <- all_size %>%
   t()
 
 marss_data <- all_size_marss
+```
+
+#Set up function for plotting parameters
+```{r}
+plot.pars <- function(fit) {
+    df <- broom::tidy(fit)
+    df$parameter <- sapply(df$term, function(x) {
+        stringr::str_split(x, "[.]")[[1]][1]
+    })
+    df$parameter[df$parameter %in% c("R", "Q")] <- "R and Q"
+    ggplot2::ggplot(df, ggplot2::aes(x = term, y = estimate)) + 
+        ggplot2::geom_point() + ggplot2::geom_errorbar(ggplot2::aes(ymin = conf.low, 
+        ymax = conf.up), width = 0.2) + geom_hline(yintercept = 0, 
+        col = "blue") + facet_wrap(~parameter, scales = "free")
+}
+```
+
+# Run individual MARSS models
+```{r}
+model_num <- 9
+mod_list$Z <- Z_models[[model_num]]
+fit_indv <- MARSS(y=marss_data, model = mod_list, silent=TRUE, control = list(maxit = 5000))
+out_indv <- data.frame(H = names(Z_models)[model_num], logLik = fit_indv$logLik, 
+                  AICc = fit_indv$AICc, num.param = fit_indv$num.params, m = length(unique(Z_models[[model_num]])), 
+                  num.iter = fit_indv$numIter, converged = !fit_indv$convergence)
+
+broom::tidy(fit_indv)
+plot.pars(fit_indv)
 ```
 
 # Loop through Z matrix models 
@@ -167,6 +196,35 @@ for (i in 1:length(fits)) {
 ```
 
 #### The residual plots are not looking great... and they're essentially the same across all models(??) 
+
+## Alternative Z-matrices (and corresponding C matrix)
+```{r}
+mod_list_alt <- list(
+  B = "identity", #MAYBE diagonal and equal or diagonal and unequal because body growth over time is autocorrelated, however both these options don't converge
+  U = "unequal",
+  Q = "diagonal and equal", #MAYBE diagonal and unequal if water mixing in each tank is different (but unlikely)
+  #Z = matrix(1, nrow = 75, ncol = 1),
+  Z = matrix(cbind(c(rep("treatment1", 25), rep(0, 50)),
+                  c(rep(0, 25), rep("treatment2", 25), rep(0, 25)),
+                  c(rep(0, 50), rep("treatment3", 25))), nrow = 75, ncol = 3),
+  A = "zero",
+  R = "diagonal and equal",
+  C = matrix(c(paste("tank", 1:5, sep=""), rep(0, 10),
+               rep(0, 5), paste("tank", 6:10, sep=""), rep(0, 5),
+               rep(0, 10), paste("tank", 11:15, sep="")), nrow = 3, byrow=TRUE),
+  c = temp_covariate,
+  #x0="unequal",
+  tinitx=0)
+
+fit_indv_alt <- MARSS(y=marss_data, model = mod_list_alt, silent=TRUE, control = list(maxit = 5000))
+fit_indv_alt
+out_indv <- data.frame(logLik = fit_indv_alt$logLik, 
+                  AICc = fit_indv_alt$AICc, num.param = fit_indv_alt$num.params, 
+                  num.iter = fit_indv_alt$numIter, converged = !fit_indv_alt$convergence)
+
+broom::tidy(fit_indv_alt)
+plot.pars(fit_indv_alt)
+```
 
 # Generate the z-scored data
 ```{r}

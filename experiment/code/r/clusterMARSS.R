@@ -75,50 +75,71 @@ marss_data_wide <- marss_data %>%
   as.matrix() %>%
   t()
 
-genotype_vec <- rep(c("A", "B", "C", "D", "E"), times = 15)
-genotype_numeric <- as.numeric(factor(genotype_vec, levels = c("A", "B", "C", "D", "E")))
-A_matrix <- matrix(genotype_numeric, ncol=1)
-
-temp_cov <- weekly_temp %>%
+temp_covariate <- weekly_temp %>%
   filter(friday < ymd("2024-02-16")) %>%
   arrange(friday, tank) %>%
-  slice(rep(1:n(), each = 5)) %>%
-  mutate(tank_rep = paste0(tank, letters[1:5][rep(1:5, times = n()/5)])) %>%
-  select(tank_rep, friday, avg_temp) %>%
-  pivot_wider(names_from = tank_rep, values_from = avg_temp) %>%
+  select(tank, friday, avg_temp) %>%
+  pivot_wider(names_from = tank, values_from = avg_temp) %>%
   mutate(week = row_number()) %>%
   select(-friday) %>%
   column_to_rownames(var = "week") %>%
   as.matrix() %>%
   t()
 
-# Make blank temperature covariate interaction matrix
-C_matrix <- matrix(0, nrow = 75, ncol = 75)
-#Fill in interaction matrix
-for (tank in 1:15) {
-  start_row <- (tank - 1) * 5 + 1
-  end_row <- start_row + 4  # 5 genotypes per tank
-  for (i in start_row:end_row) {
-    for (j in start_row:end_row) {
-      C_matrix[i, j] <- tank
-    }
-  }
-}
+C_matrix <- matrix(factor(paste("tank", rep(1:15, each = 1), sep = "")), ncol = 1)
+
+Z_models <- list(
+  H1 = matrix(factor(rep(1, 75))),
+  H2 = matrix(factor(c(rep("amb", 25), rep("sev", 25), rep("ext", 25)))),
+  H3 = matrix(factor(rep(c("A", "B", "C", "D", "E"), 15))),
+  H4 = matrix(factor(c(rep("amb", 25), rep("mhw", 50)))),
+  H5 = matrix(factor(c(rep("amb", 25), rep("sev", 25), rep("amb", 25)))), # post-hoc hypothesis
+  H6 = matrix(factor(rep(c("gen1", "gen2", "gen2", "gen2", "gen1"), 15))), # post-hoc hypothesis
+  H7 = matrix(factor(rep(c("gen1", "gen2", "gen3", "gen4", "gen1"), 15))), # post-hoc hypothesis
+  H8 = matrix(factor(c(rep(c("amb_gen1", "amb_gen2", "amb_gen2", "amb_gen2", "amb_gen1"), 5),
+                       rep(c("sev_gen1", "sev_gen2", "sev_gen2", "sev_gen2", "sev_gen1"),5),
+                       rep(c("amb_gen1", "amb_gen2", "amb_gen2", "amb_gen2", "amb_gen1"), 5)))))
+  #H10 = matrix(factor(rep(c("heatwave", "recovery"), each = 12)))) # post-hoc hypothesis
+#H9 = matrix(factor(1:75)) #Do not use! Overfits the data and has by far the worst AIC 
+
+names(Z_models) <- c("all_same", "diff_treat", "diff_genet", "mhw_same", "amb_ext_same", "AE_BCD", "AE_B_C_D", "ambExt_AE_BCD") #, "all_diff")
 
 ############################### MARSS
 
-model_listQ1 <- list(
-  B = "diagonal and unequal",
+mod_list <- list(
+  B = "diagonal and equal",
   U = "unequal",
   Q = "diagonal and equal",
-  Z = "identity",
-  A = A_matrix,
-  R = "identity",
+  Z = "placeholder",
+  A = "zero",
+  R = "diagonal and equal",
   C = C_matrix,
-  c = temp_cov
+  c = temp_covariate
 )
 
-kemfitQ1 <- MARSS(y = marss_data_wide, model = model_listQ1,
-                  control = list(maxit= 100, allow.degen=TRUE, trace=1, safe=TRUE), fit=TRUE)
-fitQ1 <- MARSS(y = marss_data_wide, model = model_listQ1,
-               control = list(maxit = 5000), inits=kemfitQ1$par)
+out.tab <- NULL
+fits <- list()
+
+for (i in 1:length(Z_models)) {
+  mod_list$Z <- Z_models[[i]]
+  fit <- MARSS(y=marss_data, model = mod_list, silent = TRUE, 
+               control = list(maxit = 5000))
+  out <- data.frame(H = names(Z_models)[i], logLik = fit$logLik, 
+                    AICc = fit$AICc, num.param = fit$num.params, m = length(unique(Z_models[[i]])), 
+                    num.iter = fit$numIter, converged = !fit$convergence)
+  out.tab <- rbind(out.tab, out)
+  fits <- c(fits, list(fit))
+}
+
+print(out.tab) #looking for: higher log likelihood, lower AIC
+
+for (i in 1:length(fits)) {
+  par(mfrow = c(2, 3))
+  resids <- MARSSresiduals(fits[[i]], type = "tt1")
+  for (j in 1:15) {
+    plot(resids$model.residuals[j, ], ylab = "model residuals", 
+         xlab = "")
+    abline(h = 0)
+    title(paste(names(Z_models[i]), ":", rownames(marss_data)[j]))
+  }
+}
