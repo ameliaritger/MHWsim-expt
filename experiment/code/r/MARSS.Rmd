@@ -145,19 +145,6 @@ plot.pars <- function(fit) {
 }
 ```
 
-# Run individual MARSS models
-```{r}
-model_num <- 9
-mod_list$Z <- Z_models[[model_num]]
-fit_indv <- MARSS(y=marss_data, model = mod_list, silent=TRUE, control = list(maxit = 5000))
-out_indv <- data.frame(H = names(Z_models)[model_num], logLik = fit_indv$logLik, 
-                  AICc = fit_indv$AICc, num.param = fit_indv$num.params, m = length(unique(Z_models[[model_num]])), 
-                  num.iter = fit_indv$numIter, converged = !fit_indv$convergence)
-
-broom::tidy(fit_indv)
-plot.pars(fit_indv)
-```
-
 # Loop through Z matrix models 
 ```{r}
 out.tab <- NULL
@@ -197,35 +184,51 @@ for (i in 1:length(fits)) {
 
 #### The residual plots are not looking great... and they're essentially the same across all models(??) 
 
-## Alternative Z-matrices (and corresponding C matrix)
+## Alternative Z/C matrices
 ```{r}
+Z <- matrix(0, nrow = 75, ncol = 3) # Fill in the matrix # First 25 rows get a 1 in column 1 (treatment 1) 
+Z[1:25, 1] <- 1 # Next 25 rows (26-50) get a 1 in column 2 (treatment 2) 
+Z[26:50, 2] <- 1 # Last 25 rows (51-75) get a 1 in column 3 (treatment 3) 
+Z[51:75, 3] <- 1 # Optional: Name the columns for clarity 
+colnames(Z) <- c("treatment 1", "treatment 2", "treatment 3")
+
+C = matrix(list(0), 3, 15)
+C[1, 1:5] <- "treatment1" # Next 25 rows (26-50) get a 1 in column 2 (treatment 2) 
+C[2, 5:10] <- "treatment2" # Last 25 rows (51-75) get a 1 in column 3 (treatment 3) 
+C[3, 11:15] <- "treatment3" # Optional: Name the columns for clarity 
+
 mod_list_alt <- list(
-  B = "identity", #MAYBE diagonal and equal or diagonal and unequal because body growth over time is autocorrelated, however both these options don't converge
+  B = "identity",
   U = "unequal",
-  Q = "diagonal and equal", #MAYBE diagonal and unequal if water mixing in each tank is different (but unlikely)
-  #Z = matrix(1, nrow = 75, ncol = 1),
-  Z = matrix(cbind(c(rep("treatment1", 25), rep(0, 50)),
-                  c(rep(0, 25), rep("treatment2", 25), rep(0, 25)),
-                  c(rep(0, 50), rep("treatment3", 25))), nrow = 75, ncol = 3),
+  Q = "diagonal and unequal",
+  Z = Z,
   A = "zero",
   R = "diagonal and equal",
-  C = matrix(c(paste("tank", 1:5, sep=""), rep(0, 10),
-               rep(0, 5), paste("tank", 6:10, sep=""), rep(0, 5),
-               rep(0, 10), paste("tank", 11:15, sep="")), nrow = 3, byrow=TRUE),
+  C = C,
   c = temp_covariate,
-  #x0="unequal",
   tinitx=0)
 
 fit_indv_alt <- MARSS(y=marss_data, model = mod_list_alt, silent=TRUE, control = list(maxit = 5000))
 fit_indv_alt
+
 out_indv <- data.frame(logLik = fit_indv_alt$logLik, 
                   AICc = fit_indv_alt$AICc, num.param = fit_indv_alt$num.params, 
                   num.iter = fit_indv_alt$numIter, converged = !fit_indv_alt$convergence)
 
-broom::tidy(fit_indv_alt)
+#broom::tidy(fit_indv_alt)
+MARSSparamCIs(fit_indv_alt)
 plot.pars(fit_indv_alt)
+
+resids <- MARSSresiduals(fit_indv_alt, type = "tt1")
+for (j in 1:75) {
+    plot(resids$model.residuals[j, ], ylab = "model residuals", 
+        xlab = "")
+    abline(h = 0)
+    title(paste(rownames(marss_data)[j]))
+    }
 ```
 
+# DON'T RUN BELOW, WE DON'T WANT TO ZSCORE THE DATA
 # Generate the z-scored data
 ```{r}
 the.mean <- apply(marss_data, 1, mean)
