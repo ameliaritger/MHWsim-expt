@@ -279,52 +279,95 @@ results <- results %>%
 #write_csv(results, here("experiment", "data", "marss_output", "H1.csv"))
 ```
 
+
 # Let's try one big for loop where we test different combos of Z/C, Q and U...
+
+## Generate the Q and U comparisons and the list of hypotheses
 ```{r}
 parameter_combinations <- expand.grid(
   Q = c("diagonal and unequal", "diagonal and equal"),
-  U = c("unequal", "equal", "zero"),
+  U = c("unequal", "equal"), #U should not be zero because our data are not de-meaned
   stringsAsFactors = FALSE
 )
 
-all_hypotheses <- list(
+zc_matrix_list <- list(
   H1 = list(Z = matrix(1, nrow = 75, ncol = 1), C = matrix(list(1), 1, 15)), #all genets and all treatments are the same
   H2 = list(Z = matrix(0, nrow = 75, ncol = 3), C = matrix(list(0), 3, 15)), #all genets are the same, all treatments are different
   H3 = list(Z = matrix(0, nrow = 75, ncol = 5), C = matrix(list(0), 5, 15)), #all genets are different, all treatments are different
-  H4 = list(Z = matrix(0, nrow = 75, ncol = 2), C = matrix(list(0), 2, 15)) #all genets are the same, MHW treatments are different from control
+  H4 = list(Z = matrix(0, nrow = 75, ncol = 2), C = matrix(list(0), 2, 15)), #all genets are the same, MHW treatments are different from control
+  H5 = list(Z = matrix(0, nrow = 75, ncol = 15), C = matrix(list(0), 15, 15)) #all genets and all treatments are different 
 )
 
-# H2: All treatments are different -> Z (75x3), C (3x15)
-all_hypotheses$H2$Z[1:25, 1] <- 1  # Treatment 1
-all_hypotheses$H2$Z[26:50, 2] <- 1  # Treatment 2
-all_hypotheses$H2$Z[51:75, 3] <- 1  # Treatment 3
-colnames(all_hypotheses$H2$Z) <- c("treatment 1", "treatment 2", "treatment 3")
-all_hypotheses$H2$C[1, 1:5] <- "treatment1"
-all_hypotheses$H2$C[2, 6:10] <- "treatment2"
-all_hypotheses$H2$C[3, 11:15] <- "treatment3"
-
-# H3: All genets are different -> Z (75x5), C (5x15)
-fill_staggered_ones <- function(Z) {
-  for (col in 1:ncol(Z)) {
+fill_staggered_ones <- function(Z, rows, cols) { #Fill staggered 1s across specified rows/cols
+  rows_to_apply <- intersect(rows, 1:nrow(Z))   # Ensure the row numbers are within the bounds of the matrix
+  for (col in cols) { # Loop over the specified columns
     start_row <- col  # Stagger the starting row for each column
-    for (i in seq(start_row, nrow(Z), by = 5)) {
-      Z[i, col] <- 1
+    for (i in seq(start_row, max(rows_to_apply), by = 5)) {
+      if (i %in% rows_to_apply) {
+        Z[i, col] <- 1
+      }
     }
   }
   return(Z)
 }
-all_hypotheses$H3$Z <- fill_staggered_ones(all_hypotheses$H3$Z)
-for (i in 1:nrow(all_hypotheses$H3$C)) {
-  all_hypotheses$H3$C[i, ] <- rep(letters[i], ncol(all_hypotheses$H3$C))
+
+# H2: All treatments are different -> Z (75x3), C (3x15)
+zc_matrix_list$H2$Z[1:25, 1] <- 1  # Treatment 1
+zc_matrix_list$H2$Z[26:50, 2] <- 1  # Treatment 2
+zc_matrix_list$H2$Z[51:75, 3] <- 1  # Treatment 3
+colnames(zc_matrix_list$H2$Z) <- c("treatment 1", "treatment 2", "treatment 3")
+zc_matrix_list$H2$C[1, 1:5] <- "treatment1"
+zc_matrix_list$H2$C[2, 6:10] <- "treatment2"
+zc_matrix_list$H2$C[3, 11:15] <- "treatment3"
+
+# H3: All genets are different -> Z (75x5), C (5x15)
+# #fill_staggered_ones <- function(Z, cols) {
+#   for (col in cols) {
+#     start_row <- col  # Stagger the starting row for each column
+#     for (i in seq(start_row, nrow(Z), by = 5)) {
+#       Z[i, col] <- 1
+#     }
+#   }
+#   return(Z)
+# }
+zc_matrix_list$H3$Z <- fill_staggered_ones(zc_matrix_list$H3$Z, 1:75, 1:5)
+colnames(zc_matrix_list$H3$Z) <- c("genetA", "genetB", "genetC", "genetD", "genetE")
+for (i in 1:nrow(zc_matrix_list$H3$C)) {
+  zc_matrix_list$H3$C[i, ] <- rep(letters[i], ncol(zc_matrix_list$H3$C))
 }
 
 # H4: MHW treatments are different from control -> Z (75x2), C (2x15)
-all_hypotheses$H4$Z[1:25, 1] <- 1  # Treatment 1
-all_hypotheses$H4$Z[26:75, 2] <- 1  # Treatment 2
-colnames(all_hypotheses$H4$Z) <- c("Ambient", "MHW")
-all_hypotheses$H4$C[1, 1:5] <- "ambient"
-all_hypotheses$H4$C[2, 6:15] <- "mhw"
+zc_matrix_list$H4$Z[1:25, 1] <- 1  # Treatment 1
+zc_matrix_list$H4$Z[26:75, 2] <- 1  # Treatment 2
+colnames(zc_matrix_list$H4$Z) <- c("ambient", "mhw")
+zc_matrix_list$H4$C[1, 1:5] <- "ambient"
+zc_matrix_list$H4$C[2, 6:15] <- "mhw"
 
+# H5: All genets and all treatments are different -> Z (75x15), C (15x15)
+zc_matrix_list$H5$Z <- fill_staggered_ones(zc_matrix_list$H5$Z,1:25, 1:5)
+zc_matrix_list$H5$Z <- fill_staggered_ones(zc_matrix_list$H5$Z,26:50, 6:10)
+zc_matrix_list$H5$Z <- fill_staggered_ones(zc_matrix_list$H5$Z,51:75, 11:15)
+colnames(zc_matrix_list$H5$Z) <- c("amb_A", "amb_B", "amb_C", "amb_D", "amb_E",
+                                   "sev_A", "sev_B", "sev_C", "sev_D", "sev_E",
+                                   "ext_A", "ext_B", "ext_C", "ext_D", "ext_E")
+for (i in 1:nrow(zc_matrix_list$H5$C)) {
+  letter_index <- (i - 1) %% 5 + 1  # This ensures we loop through 'a' to 'e'
+  letter <- letters[letter_index]  # Get the current genet
+    if (i >= 1 & i <= 5) {
+    suffix <- "ambient_"
+  } else if (i >= 6 & i <= 10) {
+    suffix <- "severe_"
+  } else if (i >= 11 & i <= 15) {
+    suffix <- "extreme_"
+  } else {
+    suffix <- ""
+  }
+  zc_matrix_list$H5$C[i, ] <- rep(paste(suffix, letter, sep = ""), 15)
+}
+```
+
+# Run the for loop to test each Q and U with each hypothesis (Z/C matrix)
+```{r, eval=FALSE}
 marss_results <- data.frame(
   logLik = numeric(), 
   AICc = numeric(), 
@@ -337,10 +380,10 @@ marss_results <- data.frame(
 )
 
 # Loop over each combination of Z and C
-for (hypothesis_number in names(all_hypotheses)) {
+for (hypothesis_number in names(zc_matrix_list)) {
   # Extract the current Z and C combination
-  Z <- all_hypotheses[[hypothesis_number]]$Z
-  C <- all_hypotheses[[hypothesis_number]]$C
+  Z <- zc_matrix_list[[hypothesis_number]]$Z
+  C <- zc_matrix_list[[hypothesis_number]]$C
   
   # Loop over each combination of parameters (Q and U)
   for (i in 1:nrow(parameter_combinations)) {
@@ -377,10 +420,107 @@ for (hypothesis_number in names(all_hypotheses)) {
     marss_results <- rbind(marss_results, out_indv)
   }
 }
+
+marss_results %>%
+  arrange(AICc)
+```
+
+# Check out the best performing model for H5 (Q=diagonal and equal, U=equal)
+```{r}
+Z <- matrix(0, nrow = 75, ncol = 15)
+C <- matrix(list(0), 15, 15)
+  
+Z <- fill_staggered_ones(Z,1:25, 1:5)
+Z <- fill_staggered_ones(Z,26:50, 6:10)
+Z <- fill_staggered_ones(Z,51:75, 11:15)
+colnames(zc_matrix_list$H5$Z) <- c("amb_A", "amb_B", "amb_C", "amb_D", "amb_E",
+                                   "sev_A", "sev_B", "sev_C", "sev_D", "sev_E",
+                                   "ext_A", "ext_B", "ext_C", "ext_D", "ext_E")
+
+for (i in 1:nrow(C)) {
+  letter_index <- (i - 1) %% 5 + 1  # This ensures we loop through 'a' to 'e'
+  letter <- letters[letter_index]  # Get the current genet
+    if (i >= 1 & i <= 5) {
+    suffix <- "ambient_"
+  } else if (i >= 6 & i <= 10) {
+    suffix <- "severe_"
+  } else if (i >= 11 & i <= 15) {
+    suffix <- "extreme_"
+  } else {
+    suffix <- ""
+  }
+  C[i, ] <- rep(paste(suffix, letter, sep = ""), 15)
+}
+
+model_list <- list(
+      B = "identity",
+      U = "equal",
+      Q = "diagonal and equal",
+      Z = Z,
+      A = "zero",  # DO NOT CHANGE!
+      R = "diagonal and equal",  # DO NOT CHANGE!
+      C = C,
+      c = temp_covariate,
+      tinitx = 0)
+
+fit_marss_indv <- MARSS(y = marss_data, model = model_list, silent = TRUE, control = list(maxit = 5000))
+fit_marss_indv
+MARSSparamCIs(fit_marss_indv)
+plot.pars(fit_marss_indv)
+
+Q.est <- coef(fit_marss_indv, type = "matrix")$Q
+corrplot::corrplot(cov2cor(Q.est))
+
+resids <- MARSSresiduals(fit_marss_indv, type = "tt1")
+for (j in 1:75) {
+    plot(resids$model.residuals[j, ], ylab = "model residuals", 
+        xlab = "")
+    abline(h = 0)
+    title(paste(rownames(marss_data)[j]))
+    }
+```
+
+Red flags with the correlation matrix, so let's try hypothesis 3
+
+# Check out the best performing model for H3 (Q=diagonal and equal, U=equal)
+```{r}
+Z = matrix(0, nrow = 75, ncol = 5)
+C = matrix(list(0), 5, 15)
+
+Z <- fill_staggered_ones(Z, 1:75, 1:5)
+colnames(Z) <- c("genetA", "genetB", "genetC", "genetD", "genetE")
+for (i in 1:nrow(C)) {
+  C[i, ] <- rep(letters[i], ncol(C))
+}
+
+model_list <- list(
+      B = "identity",
+      U = "equal",
+      Q = "diagonal and equal",
+      Z = Z,
+      A = "zero",  # DO NOT CHANGE!
+      R = "diagonal and equal",  # DO NOT CHANGE!
+      C = C,
+      c = temp_covariate,
+      tinitx = 0)
+
+fit_marss_indv <- MARSS(y = marss_data, model = model_list, silent = TRUE, control = list(maxit = 5000))
+fit_marss_indv
+
+MARSSparamCIs(fit_marss_indv)
+plot.pars(fit_marss_indv)
+resids <- MARSSresiduals(fit_marss_indv, type = "tt1")
+for (j in 1:75) {
+    plot(resids$model.residuals[j, ], ylab = "model residuals", 
+        xlab = "")
+    abline(h = 0)
+    title(paste(rownames(marss_data)[j]))
+    }
 ```
 
 
 
+--------------------------------------------------------------------------------
 
 # Everything below this is "old" (but reference it if needed)
 
