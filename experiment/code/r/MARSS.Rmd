@@ -89,7 +89,7 @@ marss_data <- all_size_marss
 ```
 
 ## Hypothesis 2: All genets are the same but each treatment is different 
-```{r}
+```{r, eval=FALSE}
 Z <- matrix(0, nrow = 75, ncol = 3) # Fill in the matrix # First 25 rows get a 1 in column 1 (treatment 1) 
 Z[1:25, 1] <- 1 # Next 25 rows (26-50) get a 1 in column 2 (treatment 2) 
 Z[26:50, 2] <- 1 # Last 25 rows (51-75) get a 1 in column 3 (treatment 3) 
@@ -114,12 +114,12 @@ mod_list <- list(
 
 fit_marss <- MARSS(y=marss_data, model = mod_list, silent=TRUE, control = list(maxit = 5000))
 
-out_indv <- data.frame(logLik = fit_indv_alt$logLik, 
-                  AICc = fit_indv_alt$AICc, num.param = fit_indv_alt$num.params, 
-                  num.iter = fit_indv_alt$numIter, converged = !fit_indv_alt$convergence)
+out_indv <- data.frame(logLik = fit_marss$logLik, 
+                  AICc = fit_marss$AICc, num.param = fit_marss$num.params, 
+                  num.iter = fit_marss$numIter, converged = !fit_marss$convergence)
 out_indv
-MARSSparamCIs(fit_indv_alt)
-plot.pars(fit_indv_alt)
+MARSSparamCIs(fit_marss)
+plot.pars(fit_marss)
 
 #resids <- MARSSresiduals(fit_indv_alt, type = "tt1")
 #for (j in 1:75) {
@@ -131,7 +131,7 @@ plot.pars(fit_indv_alt)
 ```
 
 ### Let's create a "quick" for loop running through options of Q and U with this:
-```{r}
+```{r, eval=FALSE}
 parameter_combinations <- expand.grid(
   #R = c("identity", "unequal", "zero", "diagonal and unequal", "diagonal and equal"),
   Q = c("diagonal and unequal", "diagonal and equal"),
@@ -192,7 +192,7 @@ results <- results %>%
 ```
 
 ## Hypothesis 1: All genets and all treatments are the same
-```{r}
+```{r, eval=FALSE}
 Z <- matrix(1, nrow = 75, ncol = 1)
 colnames(Z) <- c("all same")
 
@@ -220,7 +220,7 @@ plot.pars(fit_indv_alt)
 ```
 
 ### For loop
-```{r}
+```{r, eval=FALSE}
 parameter_combinations <- expand.grid(
   Q = c("diagonal and unequal", "diagonal and equal"),
   U = c("unequal", "equal", "zero"),
@@ -279,9 +279,104 @@ results <- results %>%
 #write_csv(results, here("experiment", "data", "marss_output", "H1.csv"))
 ```
 
-## Let's try one big for loop where we test Z and C also...
+# Let's try one big for loop where we test different combos of Z/C, Q and U...
 ```{r}
+parameter_combinations <- expand.grid(
+  Q = c("diagonal and unequal", "diagonal and equal"),
+  U = c("unequal", "equal", "zero"),
+  stringsAsFactors = FALSE
+)
 
+all_hypotheses <- list(
+  H1 = list(Z = matrix(1, nrow = 75, ncol = 1), C = matrix(list(1), 1, 15)), #all genets and all treatments are the same
+  H2 = list(Z = matrix(0, nrow = 75, ncol = 3), C = matrix(list(0), 3, 15)), #all genets are the same, all treatments are different
+  H3 = list(Z = matrix(0, nrow = 75, ncol = 5), C = matrix(list(0), 5, 15)), #all genets are different, all treatments are different
+  H4 = list(Z = matrix(0, nrow = 75, ncol = 2), C = matrix(list(0), 2, 15)) #all genets are the same, MHW treatments are different from control
+)
+
+# H2: All treatments are different -> Z (75x3), C (3x15)
+all_hypotheses$H2$Z[1:25, 1] <- 1  # Treatment 1
+all_hypotheses$H2$Z[26:50, 2] <- 1  # Treatment 2
+all_hypotheses$H2$Z[51:75, 3] <- 1  # Treatment 3
+colnames(all_hypotheses$H2$Z) <- c("treatment 1", "treatment 2", "treatment 3")
+all_hypotheses$H2$C[1, 1:5] <- "treatment1"
+all_hypotheses$H2$C[2, 6:10] <- "treatment2"
+all_hypotheses$H2$C[3, 11:15] <- "treatment3"
+
+# H3: All genets are different -> Z (75x5), C (5x15)
+fill_staggered_ones <- function(Z) {
+  for (col in 1:ncol(Z)) {
+    start_row <- col  # Stagger the starting row for each column
+    for (i in seq(start_row, nrow(Z), by = 5)) {
+      Z[i, col] <- 1
+    }
+  }
+  return(Z)
+}
+all_hypotheses$H3$Z <- fill_staggered_ones(all_hypotheses$H3$Z)
+for (i in 1:nrow(all_hypotheses$H3$C)) {
+  all_hypotheses$H3$C[i, ] <- rep(letters[i], ncol(all_hypotheses$H3$C))
+}
+
+# H4: MHW treatments are different from control -> Z (75x2), C (2x15)
+all_hypotheses$H4$Z[1:25, 1] <- 1  # Treatment 1
+all_hypotheses$H4$Z[26:75, 2] <- 1  # Treatment 2
+colnames(all_hypotheses$H4$Z) <- c("Ambient", "MHW")
+all_hypotheses$H4$C[1, 1:5] <- "ambient"
+all_hypotheses$H4$C[2, 6:15] <- "mhw"
+
+marss_results <- data.frame(
+  logLik = numeric(), 
+  AICc = numeric(), 
+  num.param = numeric(),
+  num.iter = numeric(), 
+  converged = logical(),
+  Q = character(), U = character(),  # Add model parameter labels
+  Z_group = character(), C_group = character(),  # To track Z and C combinations
+  stringsAsFactors = FALSE
+)
+
+# Loop over each combination of Z and C
+for (hypothesis_number in names(all_hypotheses)) {
+  # Extract the current Z and C combination
+  Z <- all_hypotheses[[hypothesis_number]]$Z
+  C <- all_hypotheses[[hypothesis_number]]$C
+  
+  # Loop over each combination of parameters (Q and U)
+  for (i in 1:nrow(parameter_combinations)) {
+    # Extract the current combination of parameters for Q and U
+    current_params <- parameter_combinations[i, ]
+    
+    # Create the mod_list with current parameter values
+    mod_list_loop <- list(
+      B = "identity",
+      U = current_params$U,
+      Q = current_params$Q,
+      Z = Z,
+      A = "zero",  # DO NOT CHANGE!
+      R = "diagonal and equal",  # DO NOT CHANGE!
+      C = C,
+      c = temp_covariate,
+      tinitx = 0
+    )
+    
+    # Fit the MARSS model
+    fit_marss <- MARSS(y = marss_data, model = mod_list_loop, silent = TRUE, control = list(maxit = 5000))
+    
+    # Extract relevant output
+    out_indv <- data.frame(
+      Hypothesis = hypothesis_number, Q = current_params$Q, U = current_params$U,
+      logLik = fit_marss$logLik, 
+      AICc = fit_marss$AICc, 
+      num.param = fit_marss$num.params, 
+      num.iter = fit_marss$numIter, 
+      converged = !fit_marss$convergence
+    )
+    
+    # Append the results to the results data frame
+    marss_results <- rbind(marss_results, out_indv)
+  }
+}
 ```
 
 
