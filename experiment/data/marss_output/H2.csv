@@ -1,0 +1,7 @@
+Q,U,logLik,AICc,num.param,num.iter,converged,hypothesis
+diagonal and unequal,unequal,620.1459577616117,-1213.7973503058322,13,73,TRUE,H2
+diagonal and equal,unequal,618.6450500395609,-1214.9323765018862,11,228,TRUE,H2
+diagonal and unequal,equal,617.6852146308705,-1213.0127056845054,11,61,TRUE,H2
+diagonal and equal,equal,615.3782233669004,-1212.5132034905575,9,52,TRUE,H2
+diagonal and unequal,zero,617.6635675244491,-1215.0294354548523,10,61,TRUE,H2
+diagonal and equal,zero,614.8389551604502,-1213.4835783370947,8,17,TRUE,H2
