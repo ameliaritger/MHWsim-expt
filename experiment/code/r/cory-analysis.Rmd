@@ -16,7 +16,7 @@ library(svglite) #save vector figures
 library(ggpmisc) #statpolyeq ggplot
 library(lme4) #GLMER
 library(nlme) #nlme
-#library(glmmTMB) #GLMER
+library(glmmTMB) #GLMER
 library(glarma)
 #library(MASS) #GLARMA
 library(tseries) #ADF test
@@ -25,7 +25,11 @@ library(forecast) #ts()
 library(ggrepel) #geom_text_repel
 library(broom) #tidy()
 library(gridExtra) #grid.arrange()
-library(MARSS)
+library(vegan) #PERMANOVA
+library(cluster) #Gower distance matrix
+library(pairwiseAdonis) #pairwise comparisons with PERMANOVA
+library(ape) #PCOA
+library(AICcPermanova)
 ```
 
 # Run this ONE TIME to load temperature/body size data, then save the file to your local machine
@@ -46,6 +50,8 @@ daily_temp <- read_csv(here("experiment", "data", "three_day_temperature.csv"))
 
 ## Create tidied df
 ```{r}
+end_mhw <- ymd("2023-12-12")
+
 all_size <- all %>%
   filter(!is.na(avg_size)) %>%
   mutate(avg_size_log = log(avg_size)) %>%
@@ -56,8 +62,8 @@ all_size <- all %>%
 
 #all_sum <- all_size %>%
 #  filter(date == ymd("2023-10-06")) %>%
-#  group_by(genet, treatment) %>%
-#  summarize(n = sum(n))
+#  group_by(genet) %>%
+#  summarize(mean = mean(n))
 ```
 
 # Count max/total number of polyps
@@ -89,7 +95,7 @@ ggplot(all_sum_genet, aes(x = treatment, y = n, group = genet, color=genet)) +
         legend.position = "top") +
   coord_flip()
 
-ggsave(here("experiment", "figures", "WSN", "starting_n.png"), width=12, height=7)
+#ggsave(here("experiment", "figures", "WSN", "starting_n.png"), width=12, height=7)
 ```
 
 
@@ -333,11 +339,13 @@ ggplot(all, aes(x=date, y=dying_dead, color = treatment)) +
 
 # Start running stats
 
-## Count data - GLARMA 
+# Count data
 
 ### Prepare data
 ```{r}
 all_count <- all %>%
+  filter(date >= ymd("2023-10-06"),
+         date <= end_mhw) %>%
   #convert date to a numeric sequence
   mutate(day_numeric = as.numeric(as.Date(date)-min(as.Date(date))),
          mhw_binary = as.factor(ifelse(mhw == "during", 0, 1))) %>%
@@ -357,6 +365,8 @@ hist(all_count$n_true, breaks = seq(min(all_count$n_true)-0.5, max(all_count$n_t
      main = "Histogram of Counts", xlab = "Count", 
      ylab = "Frequency", col = "lightblue")
 ```
+
+## Count data - GLARMA 
 
 ### Compare Poisson with NB model
 ```{r}
@@ -422,7 +432,7 @@ Neither count data nor growth rate appear to follow poisson distribution. And bo
 Growth rate contains negative numbers, which complicates the fact that it appears to follow negative binomial distribution. Let's focus on the raw count numbers for now and come back to growth rate later.
 
 ### Negative binomial distribution?
-```{r}
+```{r, eval=FALSE}
 nb_fit <- glmmTMB(n_true ~ time + (1|genet_tank), data = all_count, family = nbinom1)
 summary(nb_fit)
 
@@ -475,7 +485,7 @@ summary(glarma_model_state)
 ```{r}
 glarma_model_nr <- glarma(y, x, phiLags = c(1), type = "Poi", method = "NR", residuals = "Pearson", maxit = 100, grad = 1e-6)
 summary(glarma_model_nr) #no effect of NR vs FS other than computation time being faster for NR
-glarma_model_nb <- glarma(y, x, phiLags = c(1), type = "NegBin", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6, alphaInit = 0.1)
+#glarma_model_nb <- glarma(y, x, phiLags = c(1), type = "NegBin", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6, alphaInit = 0.1)
 #NegBin doesn't run --> WHY?????? My data do not follow poisson
 
 #Let's just keep doing model comparison with different lags I guess...
@@ -613,7 +623,7 @@ plot.glarma(glarma_model_1_6)
 ```
 
 ### Add thetaLag
-```{r}
+```{r, eval=FALSE}
 #glarma_model_theta <- glarma(y, x, thetaLags = c(1), type = "Poi", method = "FS", residuals = "Pearson", maxit = 100, grad = 1e-6)
 extractAIC(glarma_model_theta)
 extractAIC(glarma_model)
@@ -849,27 +859,951 @@ count_glmm13 <- lme(n_true ~ treatment*genet,
                    data = all_count,
                    correlation = corARMA(p = 1, q = 1))
 
-count_glmm14 <- lme(n_true ~ treatment*genet,
-                   random = ~1|genet_tank,
-                   data = all_count,
-                   correlation = corARMA(p = 4, q = 1))
-
 summary(count_glmm13)
-summary(count_glmm14)
-AIC(count_glmm13, count_glmm14, count_glmm4) #4 worst, 14 best
-BIC(count_glmm13, count_glmm14, count_glmm4) #4 worst, 14 best
+BIC(count_glmm13)
 
-count_glmm15 <- lme(n_true ~ treatment*genet,
-                   random = ~1|genet_tank,
-                   data = all_count,
-                   correlation = corCAR1(form = ~ day_numeric | genet_tank))
-summary(count_glmm15)
-AIC(count_glmm14, count_glmm15) #corARMA better
-BIC(count_glmm14, count_glmm15) #corARMA better
+#count_glmm15 <- lme(n_true ~ treatment*genet,
+#                   random = ~1|genet_tank,
+#                   data = all_count,
+#                   correlation = corCAR1(form = ~ day_numeric | genet_tank))
+# I don't need corCAR1 because my time points are evenly spaced (relatively) - so corCAR1 is overkill
+
+#summary(count_glmm15)
+#AIC(count_glmm14, count_glmm15) #corARMA better
+#BIC(count_glmm14, count_glmm15) #corARMA better
 ```
 
-### Let's look at "final" GLMM options with corARMA
+## Let's for loop through a bunch of p/q options for the corARMA
 ```{r}
+p_values <- c(0, 1, 2, 3)  # Values for p
+q_values <- c(0, 1, 2)  # Values for q
+
+# Initialize an empty list to store the models
+model_list <- list()
+
+# Initialize an empty data frame to store the BIC values
+bic_table <- data.frame(p = integer(), q = integer(), BIC = numeric(), stringsAsFactors = FALSE)
+
+# Loop through all combinations of p and q
+for (p in p_values) {
+  for (q in q_values) {
+    # Fit the model with the current p and q values
+    model_name <- paste("count_glmm_p", p, "_q", q, sep = "")  # Create a unique model name
+    model <- tryCatch({
+      lme(n_true ~ treatment * genet,
+          random = ~1 | genet_tank,
+          data = all_count,
+          correlation = corARMA(p = p, q = q))
+    }, error = function(e) {
+      # If there is an error, store the error message in the list
+      return(e$message)
+    })
+    
+    # Check if the model fit was successful (not an error message)
+    if (inherits(model, "lme")) {
+      # Extract BIC value
+      bic_value <- BIC(model)
+      
+      # Append the BIC value and the corresponding p and q to the data frame
+      bic_table <- rbind(bic_table, data.frame(p = p, q = q, BIC = bic_value))
+    } else {
+      # If there's an error, you can also record it in the table
+      bic_table <- rbind(bic_table, data.frame(p = p, q = q, BIC = NA))
+    }
+  }
+}
+```
+
+Some models didn't fit but many did! And it looks like best fit is p=2, q=1
+
+Let's now check this "best fit" model with different inputs
+```{r}
+options <- c("treatment", "genet", "treatment+genet", "treatment*genet")
+
+# Initialize an empty data frame to store the results
+bic_table <- data.frame(model = character(), BIC = numeric(), stringsAsFactors = FALSE)
+
+# Loop through all combinations of fixed effects
+for (option in options) {
+  # Create the formula dynamically using as.formula
+  formula <- as.formula(paste("n_true ~", option))
+  # Fit the model with the current option and fixed p=2, q=1 for ARMA
+  model <- tryCatch({
+    lme(formula,
+        random = ~1 | genet_tank,
+        data = all_count,
+        correlation = corARMA(p = 2, q = 1))
+  }, error = function(e) {
+    # Print the error if there is one
+    print(paste("Error for option:", option, ":", e$message))
+    return(NULL)
+  })
+  
+  # If the model successfully fitted, extract BIC
+  if (!is.null(model)) {
+    bic_value <- BIC(model)
+    # Add the model name and BIC to the table
+    bic_table <- rbind(bic_table, data.frame(model = option, BIC = bic_value))
+  } else {
+    # If there's an error, store NA for BIC
+    bic_table <- rbind(bic_table, data.frame(model = option, BIC = NA))
+  }
+}
+```
+Genet only and Treatment only are the best fitting BICs
+
+Let's double check p=2 and q=1 are correct!
+```{r}
+options <- c("treatment", "genet", "treatment+genet", "treatment*genet")
+p_values <- c(0, 1, 2, 3)  # Values for p
+q_values <- c(0, 1, 2)  # Values for q
+
+# Initialize an empty data frame to store the results
+bic_table <- data.frame(model = character(), p = integer(), q = integer(), BIC = numeric(), AIC = numeric(), stringsAsFactors = FALSE)
+
+# Loop through all combinations of options, p, and q
+for (option in options) {
+  for (p in p_values) {
+    for (q in q_values) {
+      # Create the formula dynamically using as.formula for the fixed effects (option)
+      formula <- as.formula(paste("n_true ~", option))
+      
+      # Fit the model with the current option and fixed p, q for ARMA
+      model <- tryCatch({
+        lme(formula,
+            random = ~1 | genet_tank,
+            data = all_count,
+            correlation = corARMA(p = p, q = q))
+      }, error = function(e) {
+        # Print the error if there is one
+        print(paste("Error for option:", option, "p:", p, "q:", q, ":", e$message))
+        return(NULL)
+      })
+      
+      # If the model successfully fitted, extract BIC
+      if (!is.null(model)) {
+        bic_value <- BIC(model)
+        aic_value <- AIC(model)
+        # Add the model name, p, q, and BIC to the table
+        bic_table <- rbind(bic_table, data.frame(model = option, p = p, q = q, BIC = bic_value, AIC = aic_value))
+      } else {
+        # If there's an error, store NA for BIC
+        bic_table <- rbind(bic_table, data.frame(model = option, p = p, q = q, BIC = NA, AIC = NA))
+      }
+    }
+  }
+}
+```
+
+p=2, q=1 is definitely top 2 best models. p=3, q=1 comes in close second. Genet only is slightly better (VERY SLIGHTLY) than Treatment+Genet.
+
+But, this is count data! So let's see if we need to do Poisson or NB. 
+Are the data overdispersed? 
+```{r, eval=FALSE}
+mean_n_true <- mean(all_count$n_true, na.rm = TRUE)
+var_n_true <- var(all_count$n_true, na.rm = TRUE)
+
+overdispersion_by_group <- all_count %>%
+  group_by(genet_tank) %>%
+  summarise(
+    mean_n_true = mean(n_true, na.rm = TRUE),
+    var_n_true = var(n_true, na.rm = TRUE)
+  )
+
+# Check overdispersion for each group
+overdispersion_by_group %>%
+  mutate(overdispersion = ifelse(var_n_true > mean_n_true, "Yes", "No"))
+```
+The population-wide data is overdispersed, the groups are not. But lme() doesn't support NB or Poisson data. But other GLMM options don't support autocorrelation...so that's something for the discussion section then I guess bc I don't have the time!
+
+
+# Growth data
+
+## Prep data
+```{r}
+all_growth <- all %>%
+  filter(date >= ymd("2023-10-06"),
+         date <= end_mhw,
+         !is.na(avg_size)) %>%
+  #convert date to a numeric sequence
+  mutate(day_numeric = as.numeric(as.Date(date)-min(as.Date(date))),
+         mhw_binary = as.factor(ifelse(mhw == "during", 0, 1)),
+         avg_size_log = log(avg_size)) %>%
+  dplyr::select(day_numeric, date, tank, genet, treatment, mhw, mhw_binary,avg_size, avg_size_log) %>%
+  mutate(genet_tank = paste(tank, genet, sep = "")) #merge genet and tank because each unique genet x tank value is going to be autocorrelated
+```
+
+## Check distribution
+```{r}
+hist(all_growth$avg_size, 
+     main = "Histogram of Avg Size", xlab = "", 
+     ylab = "Frequency", col = "lightblue")
+
+hist(all_growth$avg_size_log, 
+     main = "Histogram of log(Avg Size)", xlab = "", 
+     ylab = "Frequency", col = "lightblue")
+```
+Definitely log transform avg size
+
+```{r}
+options <- c("treatment", "genet", "treatment+genet", "treatment*genet")
+p_values <- c(0, 1, 2, 3)  # Values for p
+q_values <- c(0, 1, 2)  # Values for q
+
+# Initialize an empty data frame to store the results
+bic_table <- data.frame(model = character(), p = integer(), q = integer(), BIC = numeric(), AIC = numeric(), stringsAsFactors = FALSE)
+
+# Loop through all combinations of options, p, and q
+for (option in options) {
+  for (p in p_values) {
+    for (q in q_values) {
+      # Create the formula dynamically using as.formula for the fixed effects (option)
+      formula <- as.formula(paste("avg_size_log ~", option))
+      
+      # Fit the model with the current option and fixed p, q for ARMA
+      model <- tryCatch({
+        lme(formula,
+            random = ~1 | genet_tank,
+            data = all_growth,
+            correlation = corARMA(p = p, q = q))
+      }, error = function(e) {
+        # Print the error if there is one
+        print(paste("Error for option:", option, "p:", p, "q:", q, ":", e$message))
+        return(NULL)
+      })
+      
+      # If the model successfully fitted, extract BIC
+      if (!is.null(model)) {
+        bic_value <- BIC(model)
+        aic_value <- AIC(model)
+        # Add the model name, p, q, and BIC to the table
+        bic_table <- rbind(bic_table, data.frame(model = option, p = p, q = q, BIC = bic_value, AIC = aic_value))
+      } else {
+        # If there's an error, store NA for BIC
+        bic_table <- rbind(bic_table, data.frame(model = option, p = p, q = q, BIC = NA, AIC = NA))
+      }
+    }
+  }
+}
+```
+
+p=3, q=1 are top 2 best models. Treatment only is slightly better than Genet only. 
+
+# Behavior data
+
+## Prep data
+```{r}
+all_behavior <- all %>%
+  filter(date >= ymd("2023-10-06"),
+         date <= end_mhw) %>%
+  #convert date to a numeric sequence
+  mutate(day_numeric = as.numeric(as.Date(date)-min(as.Date(date))),
+         mhw_binary = as.factor(ifelse(mhw == "during", 0, 1))) %>%
+  dplyr::select(day_numeric, date, tank, genet, treatment, mhw, mhw_binary,percent_open, percent_fully_open, percent_closed, n, n_true) %>%
+  mutate(genet_tank = paste(tank, genet, sep = ""),
+         day_factor = as.factor(day_numeric))
+```
+
+## Check distribution and dispersion
+```{r}
+hist(all_behavior$percent_open, 
+     main = "Histogram of %open", xlab = "", 
+     ylab = "Frequency", col = "lightblue")
+
+hist(all_behavior$percent_fully_open, 
+     main = "Histogram of %fully open", xlab = "", 
+     ylab = "Frequency", col = "lightblue")
+
+hist(all_behavior$percent_closed, 
+     main = "Histogram of %closed", xlab = "", 
+     ylab = "Frequency", col = "lightblue")
+
+mean(all_behavior$percent_open, na.rm = TRUE)
+var(all_behavior$percent_open, na.rm = TRUE) #not overdispersed!
+overdispersion_by_group <- all_behavior %>%
+  group_by(genet_tank) %>%
+  summarise(
+    mean_n_true = mean(percent_open, na.rm = TRUE),
+    var_n_true = var(percent_open, na.rm = TRUE)
+  )
+
+ggplot(all_behavior, aes(x = date, y = percent_open, group=genet_tank, color=genet_tank)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Percentage of Behavior Over Time", x = "Time", y = "Percentage of Behavior") +
+  theme_minimal()
+
+# Check autocorrelation within each group
+grouped_data <- split(all_behavior, all_behavior$genet_tank)
+lapply(names(grouped_data), function(group_name) {
+  group_data <- grouped_data[[group_name]]
+  acf(group_data$percent_closed, 
+      lag.max = 30, 
+      main = paste("ACF for Group:", group_name))
+})
+```
+
+16/75 groups are temporally autocorrelated for percent_open/percent_closed and 20/75 for percent_fully_open. So.... can I ignore it for simplicity (for the dissertation at least...)
+9D, 7D/C/B, 5B, 4D/B/A, 2B, 14B/13D, 12C, 10D: lag 2
+9C: 5, 8B: 7, 4E: 1&3
+
+Amb: 6
+Sev: 7
+Ext: 3
+
+A: 1
+B: 6
+C: 3
+D: 5
+E: 1
+
+```{r}
+overdispersion_by_group <- all_behavior %>%
+  group_by(genet_tank) %>%
+  summarise(
+    mean_n_true = mean(percent_fully_open, na.rm = TRUE),
+    var_n_true = var(percent_fully_open, na.rm = TRUE)
+  ) #my data are definitely not overdispersed so that's good
+
+model_simple <- lmer(percent_fully_open ~ treatment * genet * day_numeric + (1 | genet_tank), data = all_behavior)
+summary(model_simple)
+
+all_behavior$percent_fully_open_logit <- log(all_behavior$percent_fully_open / (1 - all_behavior$percent_fully_open))
+
+model_binomial_treat <- glmmTMB(percent_fully_open ~ treatment + (1 | genet_tank), data = all_behavior, family = binomial(), weights=n)
+model_binomial_genet <- glmmTMB(percent_fully_open ~ genet + (1 | genet_tank), data = all_behavior, family = binomial(), weights=n)
+model_binomial_treat_genet <- glmmTMB(percent_fully_open ~ treatment + genet + (1 | genet_tank), data = all_behavior, family = binomial(), weights=n)
+model_binomial_treat_by_genet <- glmmTMB(percent_fully_open ~ treatment * genet + (1 | genet_tank), data = all_behavior, family = binomial(), weights=n)
+
+model_binomial_genet_ar <- glmmTMB(percent_fully_open ~ genet + (1 | genet_tank) + ar1(day_factor + 0|genet), data = all_behavior, family = binomial(), weights=n)
+model_binomial_treat_ar <- glmmTMB(percent_fully_open ~ treatment + (1 | genet_tank) + ar1(day_factor + 0|treatment), data = all_behavior, family = binomial(), weights=n)
+model_binomial_treat_genet_ar <- glmmTMB(percent_fully_open ~ treatment + genet + (1 | genet_tank) + ar1(day_factor + 0|treatment), data = all_behavior, family = binomial(), weights=n)
+model_binomial_treat_genet_ar2 <- glmmTMB(percent_fully_open ~ treatment + genet + (1 | genet_tank) + ar1(day_factor + 0|genet), data = all_behavior, family = binomial(), weights=n)
+model_binomial_treat_genet_ar3 <- glmmTMB(percent_fully_open ~ treatment * genet + (1 | genet_tank) + ar1(day_factor + 0|treatment), data = all_behavior, family = binomial(), weights=n)
+
+model_binomial_treat_genet_day_ar <- glmmTMB(percent_fully_open ~ treatment * genet + day_numeric + (1 | genet_tank) + ar1(day_factor + 0|treatment), data = all_behavior, family = binomial(), weights=n)
+model_binomial_treat_genet_day_ar2 <- glmmTMB(percent_fully_open ~ treatment * genet * day_numeric + (1 | genet_tank) + ar1(day_factor + 0|treatment), data = all_behavior, family = binomial(), weights=n)
+
+model_binomial_treat_genet_day <- glmmTMB(percent_fully_open ~ treatment * genet * day_numeric + (1 | genet_tank), data = all_behavior, family = binomial(), weights=n)
+
+all_behavior$percentmin <- ifelse(all_behavior$percent_fully_open == 0, all_behavior$percent_fully_open + 0.001, 
+                                  ifelse(all_behavior$percent_fully_open == 1, all_behavior$percent_fully_open - 0.001, all_behavior$percent_fully_open))
+
+model_beta <- glmmTMB(percentmin ~ treatment * genet * day_numeric + (1|tank) + (1 | tank:genet) + ar1(day_factor + 0|treatment), data = all_behavior, family = beta_family(), weights=n)
+
+BIC(model_binomial_genet, model_binomial_treat_genet, model_binomial_genet_ar, model_binomial_treat_ar, model_binomial_treat_genet_ar, model_binomial_treat_genet_ar2, model_binomial_treat_genet_ar3, model_binomial_treat_genet_day, model_beta)
+```
+
+## All the residual plots SUCK so let's just compare BICs of the beta models - because the data should be treated as beta, not binomial, distributed
+```{r}
+# 1. Treatment only + AR1
+model_beta_treatment_ar1 <- glmmTMB(
+  percentmin ~ treatment + (1 | tank) + (1 | tank:genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+# 2. Genet only + AR1
+model_beta_genet_ar1 <- glmmTMB(
+  percentmin ~ genet + (1 | tank) + (1 | tank:genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+# 3. Treatment + Genet + AR1
+model_beta_treatment_plus_genet_ar1 <- glmmTMB(
+  percentmin ~ treatment + genet + (1 | tank) + (1 | tank:genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+# 4. Treatment * Genet (interaction) + AR1
+model_beta_treatment_times_genet_ar1 <- glmmTMB(
+  percentmin ~ treatment * genet + (1 | tank) + (1 | tank:genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+# 5. Treatment only + day_numeric + AR1
+model_beta_treatment_plus_day_ar1 <- glmmTMB(
+  percentmin ~ treatment + day_numeric + (1 | tank) + (1 | tank:genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+# 6. Genet only + day_numeric + AR1
+model_beta_genet_plus_day_ar1 <- glmmTMB(
+  percentmin ~ genet + day_numeric + (1 | tank) + (1 | tank:genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+# 7. Treatment + Genet + day_numeric + AR1
+model_beta_treatment_plus_genet_plus_day_ar1 <- glmmTMB(
+  percentmin ~ treatment + genet + day_numeric + (1 | tank) + (1 | tank:genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+# 8. Treatment * Genet + day_numeric + AR1
+model_beta_treatment_times_genet_plus_day_ar1 <- glmmTMB(
+  percentmin ~ treatment * genet + day_numeric + (1 | tank) + (1 | tank:genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+# 9. Treatment + Genet * day_numeric + AR1
+model_beta_treatment_plus_genet_times_day_ar1 <- glmmTMB(
+  percentmin ~ treatment + genet * day_numeric + (1 | tank) + (1 | tank:genet) ,
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+# 10. Treatment * Genet * day_numeric + AR1 (your original fixed effects with AR1 in formula)
+model_beta_full_ar1 <- glmmTMB(
+  percentmin ~ treatment * genet * day_numeric + (1 | tank) + (1 | tank:genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+BIC_treatment_genet2 <- BIC(model_beta_treatment_ar1,model_beta_genet_ar1,model_beta_treatment_plus_genet_ar1,model_beta_treatment_times_genet_ar1,model_beta_treatment_plus_day_ar1,model_beta_genet_plus_day_ar1,model_beta_treatment_plus_genet_plus_day_ar1,model_beta_treatment_times_genet_plus_day_ar1,model_beta_treatment_plus_genet_times_day_ar1,model_beta_full_ar1)
+```
+
+## Inspect residuals versus fitted values for each grouping level of a random intercept factor
+```{r, eval=FALSE}
+library(DHARMa)
+model_to_test <- model_beta
+
+testDispersion(simulateResiduals(model_to_test))
+summary(model_to_test)
+
+# Create simulated residuals
+sim_res <- simulateResiduals(model_to_test)
+plot(sim_res)
+
+# Extract fitted values corresponding to the model's data
+fitted_model_data <- fitted(model_to_test)
+
+# Get the grouping factor corresponding to the model's data
+grouping_factor_model_data <- model_to_test$frame$tank
+
+# Check the lengths to confirm the issue
+length(sim_res$scaledResiduals)
+length(fitted_model_data)
+length(grouping_factor_model_data)
+
+# Create a data frame for plotting using the model's data
+plot_data <- data.frame(
+  scaledResiduals = sim_res$scaledResiduals,
+  fitted.values = fitted_model_data,
+  genet_tank = grouping_factor_model_data
+)
+
+ggplot(plot_data, aes(x = fitted.values, y = scaledResiduals, color = genet_tank)) +
+  geom_point(alpha = 0.6) + # Add some transparency if there's overlap
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(title = "Residuals vs. Fitted Values by genet_tank",
+       x = "Fitted Values",
+       y = "Scaled Residuals",
+       color = "genet_tank") +
+  theme_bw() +
+  theme(legend.position = "right", # Adjust legend position as needed
+        legend.text = element_text(size = 6)) 
+
+fitted(model_to_test)
+
+hist(all_behavior$percentmin, main="Histogram of close to 1")
+hist(fitted_values, main = "Histogram of Fitted Probabilities")
+plot(fitted_values, all_behavior$percent_fully_open, xlab = "Fitted Probability", ylab = "Observed Percent Open")
+abline(0, 1, col = "red")
+
+```
+
+## Model 10 is consistently the best BIC. Let's check each ar1() option then.
+```{r}
+model_0 <- glmmTMB(
+  percentmin ~ treatment * genet * day_numeric + (1 | tank) + (1 | tank:genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+model_1 <- glmmTMB(
+  percentmin ~ treatment * genet * day_numeric + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0|treatment),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+model_2 <- glmmTMB(
+  percentmin ~ treatment * genet * day_numeric + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0|genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+model_3 <- glmmTMB(
+  percentmin ~ treatment * genet * day_numeric + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0|treatment+genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+model_4 <- glmmTMB(
+  percentmin ~ treatment * genet * day_numeric + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0|tank+genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+BIC_compare <- BIC(model_0, model_1, model_2, model_3, model_4, model_5)
+
+summary(model_4)
+```
+
+Woof. The most complex model has by far the best BIC... 
+
+# well, here's the best model: 
+percentmin ~ treatment * genet * day_numeric + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0 | tank+genet), family = beta_family(), weights = n)
+
+    Variance and Std.Dev.: These show the estimated variance and standard deviation of the random intercepts for each grouping factor.
+        tank (Intercept): The variance is very small (1.011e-08), suggesting very little variability in the baseline log-odds of the behavior across different tanks after accounting for other factors.
+        tank:genet (Intercept): The variance is larger (6.657e-02), indicating more substantial variability in the baseline log-odds of the behavior for different genotypes within the same tank. This suggests that the effect of genotype can vary across tanks.
+        tank.1 day_factor0 and genet day_factor0: These relate to the AR(1) correlation structure. The variances (0.4961 and 0.1553) and standard deviations (0.7043 and 0.3940) indicate the magnitude of the random variation associated with the AR(1) process. The correlation (-0.26) between consecutive day_factor levels within tank and the correlation (0.33) within genet suggest a moderate level of autocorrelation. The negative correlation within tank implies that if the residual on one day is positive, the residual on the next day tends to be negative, and vice versa. The positive correlation within genet suggests that residuals on consecutive days for a given genotype tend to have the same sign.
+    Number of obs: The total number of observations in your dataset.
+    groups: The number of levels for each random grouping factor.
+
+3. Dispersion Parameter:
+
+    Dispersion parameter for beta family (): 15: For a beta distribution, the variance is related to the mean and a dispersion parameter. A dispersion parameter significantly different from 1 might indicate over- or under-dispersion in your data relative to a standard beta distribution. Here, 15 is considerably larger than 1, suggesting overdispersion. This means that the variance in your percent_behavior is greater than what would be expected based solely on the mean and the beta distribution.
+
+4. Conditional Model (Fixed Effects):
+
+This table presents the estimates, standard errors, z-values, and p-values for the fixed effect coefficients. Remember that because you used a logit link, these coefficients are on the log-odds scale. To interpret the effects on the original probability scale, you would need to exponentiate them (and consider the interactions carefully).
+
+    (Intercept): This is the estimated log-odds of the percent_behavior for the baseline levels of treatment and genet when day_numeric is 0. The significant p-value (8.69e-14 ***) indicates that this baseline log-odds is significantly different from zero.
+    treatmentsevere and treatmentextreme: These coefficients represent the difference in log-odds of the behavior for the severe and extreme treatments compared to the baseline treatment (holding other variables at their reference levels or zero). Both are negative and highly significant, suggesting that both severe and extreme treatments are associated with a decrease in the log-odds (and thus the probability) of the behavior compared to the baseline treatment.
+    genetB, genetC, genetD, genetE: These coefficients represent the difference in log-odds of the behavior for each of these genotypes compared to the baseline genotype. genetB, genetC, and genetE have negative and significant coefficients, indicating a lower log-odds of the behavior compared to the baseline genotype. genetD's coefficient is not significant, suggesting no significant difference from the baseline genotype.
+    day_numeric: The coefficient is small and not significant, suggesting that overall, there is no strong linear relationship between day_numeric and the log-odds of the behavior across all treatments and genotypes at their baseline levels.
+    Interaction Terms (e.g., treatmentsevere:genetB): These coefficients represent the additional effect of the interaction between the two variables on the log-odds of the behavior, beyond their individual main effects. For example, treatmentsevere:genetB (0.548145, p = 0.021071 *) indicates that the effect of the severe treatment on the log-odds of the behavior is different for genetB compared to the baseline genotype. A positive coefficient here suggests that the decrease in log-odds associated with the severe treatment is less pronounced for genetB.
+    Three-way Interaction Terms (e.g., treatmentsevere:genetB:day_numeric): These coefficients indicate how the two-way interaction between treatment and genet changes with day_numeric. For example, treatmentsevere:genetB:day_numeric (-0.017571, p < 2e-16 ***) suggests that the difference in the effect of the severe treatment between genetB and the baseline genotype changes significantly with each unit increase in day_numeric. The negative coefficient implies that the mitigating effect (as seen in the positive two-way interaction) of genetB on the severe treatment decreases as day_numeric increases.
+ 
+# Let's run a PERMANOVA of everything (like Minuti et al 2021)
+
+## Prep PERMANOVA data
+```{r}
+all_permanova <- all %>%
+  filter(date > ymd("2023-10-06"), #remove 10-06 to make # days between mhw/recovery equivalent
+         !is.na(avg_size)) %>%
+  mutate(day_numeric = as.numeric(as.Date(date)-min(as.Date(date))),
+         avg_size_log = log(avg_size),
+         mhw = ifelse(date <= ymd("2023-12-12"), "during", "after")) %>%
+  dplyr::select(day_numeric, date, tank, genet, treatment, mhw, avg_size, avg_size_log, percent_open, percent_fully_open, percent_closed, n, n_true, growth_rate) %>%
+  mutate(mhw_treatment = interaction(mhw, treatment),
+         mhw_genet = interaction(mhw, genet))
+
+#response_matrix <- all_permanova[, c("percent_open", "n_true", "avg_size")]
+#distance_matrix <- daisy(response_matrix, metric = "gower")
+
+# check homogeneity of mutlivariate dispersion
+#dispersion <- betadisper(distance_matrix, group = all_permanova$genet)
+#anova(dispersion) #A significant p-value indicates that at least one group has a different dispersion than others.
+#permutest(dispersion, pairwise = TRUE) # If the overall ANOVA is significant, this performs pairwise permutation tests to see which specific groups have significantly different dispersions
+
+hist(all_permanova$percent_open)
+hist(all_permanova$n_true)
+hist(all_permanova$avg_size_log)
+
+response_matrix <- all_permanova[, c("percent_open", "n_true", "avg_size_log")]
+distance_matrix <- daisy(response_matrix, metric = "gower")
+
+# check homogeneity of mutlivariate dispersion
+dispersion <- betadisper(distance_matrix, group = all_permanova$genet)
+anova(dispersion) #A significant p-value indicates that at least one group has a different dispersion than others.
+#we need to log-transform body size dats because there is no statistically diff dispersion between GENETS 
+permutest(dispersion, pairwise = TRUE) # If the overall ANOVA is significant, this performs pairwise permutation tests to see which specific groups have significantly different dispersions
+boxplot(dispersion)
+```
+
+## Let's start "simple" and look at timepoint-by-treatment differences
+```{r}
+permanova_mhw_treatment <- adonis(distance_matrix ~ mhw_treatment,
+                                   data = all_permanova,
+                                   permutations = 999)
+#print(permanova_mhw_treatment)
+
+pairwise_comparisons <- pairwise.adonis(distance_matrix, factors = all_permanova$mhw_treatment, p.adjust.m = "bonferroni")
+pairwise_comparisons
+```
+
+
+The heatwave treatments (severe and extreme) during the heatwave were significantly different from the ambient conditions during the heatwave.
+The conditions after the heatwave (ambient, severe, and extreme) were significantly different from the ambient conditions during the heatwave.
+There were also significant differences between some of the "during" heatwave conditions and the "after" heatwave conditions within the same treatment level (e.g., during.cold vs. after.cold).
+
+There was A LOT (80%) of unexplained variation in this simple model though. Perhaps genet explains a lot of that? 
+
+## Let's now look at timepoint-by-genet differences
+```{r}
+permanova_mhw_genet <- adonis(distance_matrix ~ mhw_genet,
+                               data = all_permanova,
+                               permutations = 999)
+#print(permanova_mhw_genet)
+
+pairwise_comparisons <- pairwise.adonis(distance_matrix, factors = all_permanova$mhw_genet, p.adjust.m = "bonferroni")
+pairwise_comparisons
+```
+
+Every single genet combo is significant... AND there was a lot less (54%) unexplained variation! So gosh darn it, let's do the most complex model. 
+
+## The "most complex" PERMANOVA
+```{r}
+permanova_mhw_treatment_genet <- adonis(distance_matrix ~ mhw * treatment * genet,
+                                  data = all_permanova,
+                                  permutations = 999)
+#print(permanova_mhw_treatment_genet)
+
+all_permanova$mhw_treatment_genet <- interaction(all_permanova$mhw, all_permanova$treatment, all_permanova$genet)
+pairwise_mhw_treatment_genet <- pairwise.adonis(distance_matrix, factors = all_permanova$mhw_treatment_genet, p.adjust.m = "bonferroni")
+print(pairwise_mhw_treatment_genet)
+```
+
+# Hmm that has very similar (48%) residual variation as genet only. Let's try a combo treatment_mhw * genet model? 
+```{r}
+permanova_mhw_treatment_genet2 <- adonis(distance_matrix ~ mhw_treatment * genet,
+                                   data = all_permanova,
+                                   permutations = 999)
+
+print(permanova_mhw_treatment_genet2)
+```
+This actually gives us the same results. So I think it's the same as mhw * treamtment * genet
+
+There's still 48% of residual variation, let's see if the progression of time (days into the MHW/recovery) could explain some of it better?
+Keep
+```{r}
+all_permanova$relative_day <- NA
+
+# Assign relative days for each phase
+for (phase in unique(all_permanova$mhw)) {
+  idx <- all_permanova$mhw == phase
+  min_day <- min(all_permanova$day_numeric[idx], na.rm = TRUE)
+  all_permanova$relative_day[idx] <- all_permanova$day_numeric[idx] - min_day
+}
+
+permanova_mhw_genet_day <- adonis(distance_matrix ~ mhw_genet + relative_day, data = all_permanova, permutations = 999)
+#print(permanova_mhw_genet_day) #residual R2 is 46%
+
+permanova_mhw_treatment_genet_day <- adonis(distance_matrix ~ mhw * treatment * genet + relative_day, data = all_permanova, permutations = 999)
+#print(permanova_mhw_treatment_genet_day) #residual R2 is 40%
+permanova_mhw_treatment_genet_day$aov.tab
+
+#Because I don't think the response is going to be linear over time (re: relative day), let's explore a quadratic term for relative_day
+#permanova_mhw_treatment_genet_nonlinear_day <- adonis(distance_matrix ~ mhw * treatment * genet + relative_day + I(relative_day^2), data = all_permanova, permutations = 999)
+#print(permanova_mhw_treatment_genet_nonlinear_day)
+#permanova_mhw_treatment_genet_nonlinear_day$aov.tab # This removes less than 1% from the residual R2... not worth it
+```
+
+# Let's visualize distance matrix with ordination plot
+```{r}
+response_matrix <- all_permanova[, c("percent_open", "n_true", "avg_size_log")]
+distance_matrix <- daisy(response_matrix, metric = "gower")
+
+pcoa_result <- pcoa(distance_matrix)
+pcoa_scores <- as.data.frame(pcoa_result$vectors)
+colnames(pcoa_scores) <- paste0("PCoA", 1:ncol(pcoa_scores))
+
+# Combine the PCoA scores with your all_permanova data
+plot_data <- cbind(all_permanova, pcoa_scores)
+
+# Determine the percentage of variance explained by the first two axes
+eigenvalues <- pcoa_result$values$Eigenvalues
+percent_explained_axis1 <- round((eigenvalues[1] / sum(eigenvalues)) * 100, 1)
+percent_explained_axis2 <- round((eigenvalues[2] / sum(eigenvalues)) * 100, 1)
+```
+
+# Plot the PCOAs
+```{r}
+ggplot(plot_data, aes(x = PCoA1, y = PCoA2, color = mhw)) +
+  geom_point(size = 3) +
+    stat_ellipse(geom = "polygon", alpha = 0.2, aes(fill = mhw), level = 0.95) + # 95% confidence ellipse
+  labs(
+    title = "PCoA Plot Colored by MHW Period",
+    x = paste0("PCoA1 (", percent_explained_axis1, "% explained)"),
+    y = paste0("PCoA2 (", percent_explained_axis2, "% explained)"),
+    color = "MHW Period"
+  ) +
+  theme_bw()
+
+ggplot(plot_data, aes(x = PCoA1, y = PCoA2, color = treatment)) +
+  geom_point(size = 3) +
+    stat_ellipse(geom = "polygon", alpha = 0.2, aes(fill = treatment), level = 0.95) + # 95% confidence ellipse
+  labs(
+    title = "PCoA Plot Colored by Treatment",
+    x = paste0("PCoA1 (", percent_explained_axis1, "% explained)"),
+    y = paste0("PCoA2 (", percent_explained_axis2, "% explained)"),
+    color = "Treatment"
+  ) +
+  theme_bw()
+
+ggplot(plot_data, aes(x = PCoA1, y = PCoA2, shape = genet, color = genet)) +
+  geom_point(size = 3) +
+  stat_ellipse(geom = "polygon", alpha = 0.2, aes(fill = genet), level = 0.95) + # 95% confidence ellipse
+  labs(
+    title = "PCoA Plot Shaped and Colored by Genet",
+    x = paste0("PCoA1 (", percent_explained_axis1, "% explained)"),
+    y = paste0("PCoA2 (", percent_explained_axis2, "% explained)"),
+    shape = "Genet",
+    color = "Genet"
+  ) +
+  theme_bw()
+
+ggplot(plot_data, aes(x = PCoA1, y = PCoA2, color = mhw_treatment)) +
+  geom_point(size = 3) +
+  stat_ellipse(geom = "polygon", alpha = 0.2, aes(fill = mhw_treatment), level = 0.95) + # 95% confidence ellipse
+  labs(
+    title = "PCoA Plot Colored by MHW and Treatment Interaction",
+    x = paste0("PCoA1 (", percent_explained_axis1, "% explained)"),
+    y = paste0("PCoA2 (", percent_explained_axis2, "% explained)"),
+    color = "MHW x Treatment"
+  ) +
+  theme_bw()
+```
+
+Measured variables (especially population growth and body size) are strongly autocorrelated which is no-bueno for PERMANOVA so let's super simplify the data.
+6 time points: start/mid/end of MHW, start/mid/end of recovery
+```{r}
+all_simple <- all %>%
+  filter(date >= ymd("2023-10-06"), #remove 10-06 to make # days between mhw/recovery equivalent
+         !is.na(avg_size)) %>%
+  mutate(day_numeric = as.numeric(as.Date(date)-min(as.Date(date))),
+         avg_size_log = log(avg_size),
+         mhw = ifelse(date <= ymd("2023-12-12"), "during", "after")) %>%
+  dplyr::select(day_numeric, date, tank, genet, treatment, mhw, avg_size, avg_size_log, percent_open, percent_fully_open, percent_closed, n, n_true, growth_rate) %>%
+  mutate(mhw_treatment = interaction(mhw, treatment),
+         mhw_genet = interaction(mhw, genet),
+         treatment_genet = interaction(treatment, genet)) %>%
+  group_by(mhw) %>%
+  mutate(week = as.numeric(as.Date(date)-min(as.Date(date)))/7,
+         relative_day = day_numeric - min(day_numeric, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(case_when(mhw=="during" ~ week %in% c(0, 5, 9),
+                   mhw=="after" ~ week %in% c(0, 4, 8))) %>%
+  mutate(mhw_week = interaction(all_simple$mhw, all_simple$week))
+
+hist(all_simple$percent_open)
+hist(all_simple$n_true)
+hist(all_simple$avg_size_log)
+
+response_matrix <- all_simple[, c("percent_open", "n_true", "avg_size_log")]
+distance_matrix <- daisy(response_matrix, metric = "gower")
+
+# check homogeneity of mutlivariate dispersion
+dispersion <- betadisper(distance_matrix, group = all_simple$mhw_week)
+anova(dispersion) #A significant p-value indicates that at least one group has a different dispersion than others.
+permutest(dispersion, pairwise = TRUE) # If the overall ANOVA is significant, this performs pairwise permutation tests to see which specific groups have significantly different dispersions
+boxplot(dispersion)
+```
+
+## Let's merge "time into the mhw" with "mhw" 
+```{r}
+permanova_mhw <- adonis(distance_matrix ~ mhw_week,
+                        data = all_simple,
+                        permutations = 999)
+permanova_mhw$aov.tab #R2 = 0.56
+#pairwise_comparisons <- pairwise.adonis(distance_matrix, factors = all_simple$mhw, p.adjust.m = "bonferroni")
+#pairwise_comparisons
+
+permanova_treatment <- adonis(distance_matrix ~ treatment,
+                               data = all_simple,
+                               permutations = 999)
+permanova_treatment$aov.tab #R2 = 0.98
+#pairwise_comparisons <- pairwise.adonis(distance_matrix, factors = all_simple$mhw_genet, p.adjust.m = "bonferroni")
+#pairwise_comparisons
+
+permanova_genet <- adonis(distance_matrix ~ genet,
+                                  data = all_simple,
+                                  permutations = 999)
+permanova_genet$aov.tab #R2 = 0.74
+
+permanova_mhw_genet <- adonis(distance_matrix ~ mhw_week*genet,
+                                  data = all_simple,
+                                  permutations = 999)
+permanova_mhw_genet$aov.tab #R2 = 0.28
+
+permanova_mhw_treatment <- adonis(distance_matrix ~ mhw_week*treatment,
+                                  data = all_simple,
+                                  permutations = 999)
+permanova_mhw_treatment$aov.tab #R2 = 0.54
+
+permanova_mhw_treatment_genet <- adonis(distance_matrix ~ mhw_week*treatment*genet,
+                                  data = all_simple,
+                                  permutations = 999)
+permanova_mhw_treatment_genet$aov.tab #R2 = 0.22
+
+permanova_mhw_treatment_genet2 <- adonis(distance_matrix ~ mhw_week+treatment+genet,
+                                  data = all_simple,
+                                  permutations = 999)
+permanova_mhw_treatment_genet2$aov.tab #R2 = 0.28
+
+permanova_mhw_treatment_genet3 <- adonis(distance_matrix ~ mhw_week*treatment+genet,
+                                  data = all_simple,
+                                  permutations = 999)
+permanova_mhw_treatment_genet3$aov.tab #R2 = 0.27
+
+permanova_mhw_treatment_genet4 <- adonis(distance_matrix ~ mhw_week+treatment*genet,
+                                  data = all_simple,
+                                  permutations = 999)
+permanova_mhw_treatment_genet4$aov.tab #R2 = 0.26
+
+permanova_mhw_treatment_genet5 <- adonis(distance_matrix ~ mhw_week*genet+treatment,
+                                  data = all_simple,
+                                  permutations = 999)
+permanova_mhw_treatment_genet5$aov.tab #R2 = 0.26
+
+#pairwise_mhw_treatment_genet <- pairwise.adonis(distance_matrix, factors = all_simple$mhw_treatment_genet, p.adjust.m = "bonferroni")
+#print(pairwise_mhw_treatment_genet)
+```
+
+# Calculate adjusted R-squared to compare models
+```{r}
+calculate_adjusted_r_squared <- function(adonis_model) {
+  n_observations <- 450 # Setting n_observations directly to 450
+  r_squared <- 1-adonis_model$aov.tab["Residuals", "R2"] # Get Model R-squared
+  df_model <- sum(adonis_model$aov.tab[-nrow(adonis_model$aov.tab), "Df"]) # Total Df of model terms
+  df_residuals <- adonis_model$aov.tab["Residuals", "Df"] # Df of residuals
+
+  adjusted_r_squared <- 1 - ((1 - r_squared) * (n_observations - 1) / df_residuals)
+  return(adjusted_r_squared)
+}
+```
+
+## Calculate adjusted R2
+```{r}
+calculate_adjusted_r_squared(permanova_mhw_treatment_genet)
+permanova_mhw_treatment_genet$aov.tab
+
+calculate_adjusted_r_squared(permanova_mhw_treatment_genet4)
+permanova_mhw_treatment_genet4$aov.tab
+
+#model0 <- adonis2(distance_matrix ~ mhw_week*genet,
+#                                  data = all_simple,
+#                                  permutations = 999)
+#model1 <- adonis2(distance_matrix ~ mhw_week*treatment*genet,
+#                                  data = all_simple,
+#                                  permutations = 999)
+model2 <- adonis2(distance_matrix ~ mhw_week+treatment*genet,
+                                  data = all_simple,
+                                  permutations = 999)
+
+#model3 <- adonis2(distance_matrix ~ mhw_week*genet+treatment,
+#                                  data = all_simple,
+#                                  permutations = 999)
+
+#model4 <- adonis2(distance_matrix ~ mhw_week+treatment+genet,
+#                                  data = all_simple,
+#                                  permutations = 999)
+
+permanova_mhw_treatment_genet4$aov.tab #mhw + treatment*genet
+permanova_mhw_treatment_genet5$aov.tab #mhw*genet + treatment 
+permanova_mhw_treatment_genet2$aov.tab #mhw + treatment + genet
+
+pairwise_comparisons <- pairwise.adonis(distance_matrix, factors = all_simple$genet, p.adjust.m = "bonferroni")
+print(pairwise_comparisons)
+
+model2 
+model3
+model4
+
+AICperm0 <- AICc_permanova2(model0)
+AICperm1 <- AICc_permanova2(model1)
+AICperm2 <- AICc_permanova2(model2)
+AICperm3 <- AICc_permanova2(model3)
+AICperm4 <- AICc_permanova2(model4)
+
+AIC_table <- data.frame(
+  Model = c("model0", "model1", "model2", "model3", "model4"),
+  AICc = c(AICperm0$AICc, AICperm1$AICc, AICperm2$AICc, AICperm3$AICc, AICperm4$AICc)
+)
+```
+
+## Let's try "cheating" with the AICcPermanova package
+```{r, eval=FALSE}
+AllModels <- make_models(vars = c("mhw_week", "treatment", "genet", "week", "mhw"))
+NonColinear <- filter_vif(all_forms = AllModels, env_data = all_simple)
+
+distance_data <- all_simple %>%
+  select("percent_open", "n_true", "avg_size_log")
+
+Fitted <- fit_models(
+  all_forms = NonColinear,
+  veg_data = distance_data,
+  env_data = all_simple,
+  ncores = 4,
+  method = "gower"
+)
+```
+
+```{r}
+AICc.PERMANOVA2 <- function(adonis2.model) {
+    
+    # check to see if object is an adonis2 model...
+    
+    if (is.na(adonis2.model$SumOfSqs[1]))
+        stop("object not output of adonis2 {vegan} ")
+    
+    # Ok, now extract appropriate terms from the adonis model Calculating AICc
+    # using residual sum of squares (RSS or SSE) since I don't think that adonis
+    # returns something I can use as a likelihood function... maximum likelihood
+    # and MSE estimates are the same when distribution is gaussian See e.g.
+    # https://www.jessicayung.com/mse-as-maximum-likelihood/;
+    # https://towardsdatascience.com/probability-concepts-explained-maximum-likelihood-estimation-c7b4342fdbb1
+    # So using RSS or MSE estimates is fine as long as the residuals are
+    # Gaussian https://robjhyndman.com/hyndsight/aic/ If models have different
+    # conditional likelihoods then AIC is not valid. However, comparing models
+    # with different error distributions is ok (above link).
+    
+    
+    RSS <- adonis2.model$SumOfSqs[ length(adonis2.model$SumOfSqs) - 1 ]
+    MSE <- RSS / adonis2.model$Df[ length(adonis2.model$Df) - 1 ]
+    
+    nn <- adonis2.model$Df[ length(adonis2.model$Df) ] + 1
+    
+    k <- nn - adonis2.model$Df[ length(adonis2.model$Df) - 1 ]
+    
+    AIC <- 2*k + nn*log(RSS/nn)
+    AIC.g <- 2*k + nn * (1 + log( 2 * pi * RSS / nn))
+    AIC.MSE <- 2*k + nn * log(MSE)
+    AIC.pi <- k + nn*(1 + log( 2*pi*RSS/(nn-k) )   )
+    AICc <- AIC + (2*k*(k + 1))/(nn - k - 1)
+    AICc.MSE <- AIC.MSE + (2*k*(k + 1))/(nn - k - 1)
+    AICc.pi <- AIC.pi + (2*k*(k + 1))/(nn - k - 1)
+    
+    output <- list("AIC" = AIC, "AICc" = AICc, "AIC.g" = AIC.g, 
+                   "AIC.MSE" = AIC.MSE, "AICc.MSE" = AICc.MSE,
+                   "AIC.pi" = AIC.pi, "AICc.pi" = AICc.pi, "k" = k, "N" = nn)
+    
+    return(output)   
+    
+}
+```
+
+
+```{r}
+AIC1 <- AICc.PERMANOVA2(model1)
+AIC2 <- AICc.PERMANOVA2(model2)
+```
+
+# DONE. 
+
+
+### Let's look at "final" GLMM options with corARMA
+```{r, eval=FALSE}
 count_glmm14 <- lme(n_true ~ treatment*genet,
                    random = ~1|genet_tank,
                    data = all_count,
@@ -934,7 +1868,7 @@ ggplot(all_count, aes(x = treatment, y = n_true, color = genet)) +
 ```
 
 #### We might need a nonlinear regression, the curves are logistic
-```{r}
+```{r, eval=FALSE}
 glmer1 <- glmer.nb(n_true ~ treatment*genet + (1|genet_tank), 
                 data = all_count)
 
