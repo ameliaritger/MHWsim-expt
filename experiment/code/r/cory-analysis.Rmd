@@ -60,10 +60,14 @@ all_size <- all %>%
          avg_size_diff2 = avg_size_diff - lag(avg_size_diff)) %>%
   ungroup()
 
-#all_sum <- all_size %>%
-#  filter(date == ymd("2023-10-06")) %>%
-#  group_by(genet) %>%
-#  summarize(mean = mean(n))
+all_mhw <- all %>%
+  filter(date <= end_mhw,
+         date >= ymd("2023-10-06"))
+
+#all_sum <- all %>%
+  #filter(date == ymd("2023-10-06")) %>%
+#  group_by(date) %>%
+#  summarize(sum_n = sum(n))
 ```
 
 # Count max/total number of polyps
@@ -112,7 +116,7 @@ ggplot(all, aes(x=date, y=diff_n_cont, color=genet)) +
 
 ## Plot basic growth rate across entire experiment
 ```{r, fig.width=10}
-ggplot(all, aes(x=date, y=growth_rate_cont, color=genet)) +
+ggplot(all, aes(x=date, y=n_true, color=genet)) +
   facet_wrap(~treatment,
              labeller =  labeller(treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
   geom_point(alpha=0.5) +
@@ -126,6 +130,38 @@ ggplot(all, aes(x=date, y=growth_rate_cont, color=genet)) +
 
 #ggsave(here("experiment", "figures", "growth_genet.png"), width=12, height=7)
 ```
+
+```{r}
+ggplot(all_mhw, aes(x=date, y=n_true)) +
+  geom_point(aes(color=genet), size=1.5) +
+  #geom_smooth(aes(fill=genet, color=genet), method="nls", formula = y ~ a * exp(-b * x) + C, start = list(a = max(all_mhw$avg_size), b = 0.1, C = min(all_mhw$avg_size)), se=T) + 
+  geom_smooth(aes(fill=genet, color=genet), method="glm", method.args = list(family = gaussian(link = "log")), se=T) +
+  #geom_smooth(aes(fill=genet, color=genet),method="loess", span=1, se=T) +
+  facet_wrap(~treatment,
+             labeller =  labeller(treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
+  scale_x_date(date_labels = "%b %d",
+               breaks = scales::date_breaks("2 weeks"),
+               limits = c(min(all_mhw$date), max = NA)) +
+  scale_fill_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  labs(x = "",
+       y = "Number of ramets",
+       color = "Genet",
+       fill = "Genet") +  
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=22),
+        axis.text.y=element_text(size=22),
+        axis.title.x=element_blank(),
+        axis.title.y=element_text(size=24),
+        legend.text=element_text(size=18),
+        legend.title=element_text(size=22),
+        strip.text = element_text(size = 24),
+        strip.background = element_rect(fill="white"),
+        legend.position = "top")
+
+#ggsave(here("experiment", "figures", "dissertation", "n_polyps.png"), height=8, width=12)
+```
+
 
 ## Plot growth rate of all genets during and after MHW
 ```{r}
@@ -281,9 +317,78 @@ ggplot(all, aes(x = genet, y = percent_fully_open, fill = genet, group = interac
 #ggsave(here("experiment", "figures", "open_MHW_genet.png"), width=12, height=7)
 ```
 
+## Other way to visualize behavior data
+```{r}
+all_mhw_group <- all_mhw %>%
+  mutate(week = floor_date(date, unit = "week")) %>%
+  group_by(week, treatment, genet) %>%
+  summarize(avg = mean(percent_open),
+            sd = sd(percent_open))
+
+ggplot(all_mhw_group, aes(x=week, y=avg)) +
+  geom_point(aes(color=genet), size=3) +
+  geom_errorbar(aes(ymin = avg - sd, ymax = avg + sd, color=genet), width = 0.2) +
+  #geom_smooth(aes(fill=genet, color=genet), method="loess", span=2, se=F) +
+  geom_line(aes(color=genet)) +
+  facet_wrap(~treatment,
+             labeller =  labeller(treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
+  scale_x_date(date_labels = "%b %d",
+               breaks = scales::date_breaks("2 weeks"),
+               limits = c(min(all_mhw$date), max = NA)) +
+  scale_fill_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
+  labs(x = "",
+       y = "Number of ramets",
+       color = "Genet",
+       fill = "Genet") +  
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=22),
+        axis.text.y=element_text(size=22),
+        axis.title.x=element_blank(),
+        axis.title.y=element_text(size=24),
+        legend.text=element_text(size=18),
+        legend.title=element_text(size=22),
+        strip.text = element_text(size = 24),
+        strip.background = element_rect(fill="white"),
+        legend.position = "top")
+
+ggplot(all_mhw_group, aes(x=week, y=avg, color=treatment, fill=treatment)) +
+  geom_smooth(method="glm", method.args = list(family = gaussian(link = "log")), se=T, alpha=0.2) +
+  geom_point(size=3) +
+  geom_errorbar(aes(ymin = avg - sd, ymax = avg + sd), width = 0.2) +
+  #geom_smooth(method="glm", method.args = list(family = gaussian(link = "log")), se=T) +
+  #geom_smooth(method="loess", span=2, se=F) +
+  #geom_line(aes(color=treatment)) +
+  facet_wrap(~genet, ncol=3,
+             labeller =  labeller(genet = c("A" = "Genet A", "B" = "Genet B", "C" = "Genet C", "D" = "Genet D", "E" = "Genet E"))) +
+  scale_x_date(date_labels = "%b %d",
+               breaks = scales::date_breaks("2 weeks"),
+               limits = c(min(all_mhw$date), max = NA)) +
+  scale_color_manual(values = c("cold" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00"),
+                    labels = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW")) +
+  scale_fill_manual(values = c("cold" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00"),
+                    labels = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW")) +
+  labs(x = "",
+       y = "Proportion of open ramets",
+       color = "Treatment",
+       fill = "Treatment") +  
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=22),
+        axis.text.y=element_text(size=22),
+        axis.title.x=element_blank(),
+        axis.title.y=element_text(size=24),
+        legend.text=element_text(size=20),
+        legend.title=element_text(size=24),
+        strip.text = element_text(size = 24),
+        strip.background = element_rect(fill="white"),
+        legend.position = "top")
+
+#ggsave(here("experiment", "figures", "dissertation", "behavior.png"), height=12, width=12)
+```
+
 ## Plot total biomass over time
 ```{r}
-ggplot(all, aes(x=date, y=total_biomass)) +
+ggplot(all_mhw, aes(x=date, y=total_biomass)) +
   geom_point(aes(color=genet), size=0.5) +
   geom_smooth(aes(fill=genet, color=genet), method="lm", se=T) +
   facet_wrap(~treatment,
@@ -301,20 +406,34 @@ ggplot(all, aes(x=date, y=total_biomass)) +
 
 ## Plot average body size over time
 ```{r}
-ggplot(all, aes(x=date, y=avg_size)) +
-  geom_point(aes(color=genet), size=0.5) +
-  geom_smooth(aes(fill=genet, color=genet), method="loess", se=T) +
+ggplot(all_mhw, aes(x=date, y=log(avg_size))) +
+  geom_point(aes(color=genet), size=1.5) +
+  #geom_smooth(aes(fill=genet, color=genet), method="nls", formula = y ~ a * exp(-b * x) + C, start = list(a = max(all_mhw$avg_size), b = 0.1, C = min(all_mhw$avg_size)), se=T) + 
+  geom_smooth(aes(fill=genet, color=genet), method="glm", method.args = list(family = gaussian(link = "log")), se=T) +
+  #geom_smooth(aes(fill=genet, color=genet),method="loess", span=1.4, se=T) +
   facet_wrap(~treatment,
              labeller =  labeller(treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
+  scale_x_date(date_labels = "%b %d",
+               breaks = scales::date_breaks("2 weeks"),
+               limits = c(min(all_mhw$date), max = NA)) +
   scale_fill_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
   scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45")) +
-  theme_minimal() +
-  labs(x = "Date",
-       y = "Average body size (mm)",
+  labs(x = "",
+       y = "log(average body size) (mm)",
        color = "Genet",
-       fill = "Genet")
+       fill = "Genet") +  
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=22),
+        axis.text.y=element_text(size=22),
+        axis.title.x=element_blank(),
+        axis.title.y=element_text(size=24),
+        legend.text=element_text(size=18),
+        legend.title=element_text(size=22),
+        strip.text = element_text(size = 24),
+        strip.background = element_rect(fill="white"),
+        legend.position = "top")
 
-#ggsave(here("experiment", "figures", "avg_size_mhw.png"), width=12, height=7)
+#ggsave(here("experiment", "figures", "dissertation", "logSize.png"), height=8, width=12)
 ```
 
 ## Plot mortality (lol)
@@ -1279,6 +1398,39 @@ model_beta_full_ar1 <- glmmTMB(
 BIC_treatment_genet2 <- BIC(model_beta_treatment_ar1,model_beta_genet_ar1,model_beta_treatment_plus_genet_ar1,model_beta_treatment_times_genet_ar1,model_beta_treatment_plus_day_ar1,model_beta_genet_plus_day_ar1,model_beta_treatment_plus_genet_plus_day_ar1,model_beta_treatment_times_genet_plus_day_ar1,model_beta_treatment_plus_genet_times_day_ar1,model_beta_full_ar1)
 ```
 
+```{r}
+model_beta1 <- glmmTMB(
+  percentmin ~ treatment + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0|tank+genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+model_beta2 <- glmmTMB(
+  percentmin ~ genet * day_numeric + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0|tank+genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+model_beta3 <- glmmTMB(
+  percentmin ~ treatment * genet + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0|tank+genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+model_beta4 <- glmmTMB(
+  percentmin ~ treatment * genet + day_numeric + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0|tank+genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+BIC_check <- BIC(model_beta1, model_beta2, model_beta3, model_beta4)
+```
+
+
 ## Inspect residuals versus fitted values for each grouping level of a random intercept factor
 ```{r, eval=FALSE}
 library(DHARMa)
@@ -1332,25 +1484,25 @@ abline(0, 1, col = "red")
 ## Model 10 is consistently the best BIC. Let's check each ar1() option then.
 ```{r}
 model_0 <- glmmTMB(
-  percentmin ~ treatment * genet * day_numeric + (1 | tank) + (1 | tank:genet),
+  percentmin ~ treatment * genet * day_numeric + (1 | tank),
   data = all_behavior,
   family = beta_family(),
   weights = n
 )
 model_1 <- glmmTMB(
-  percentmin ~ treatment * genet * day_numeric + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0|treatment),
+  percentmin ~ treatment * genet * day_numeric + (1 | tank:genet) + ar1(day_factor + 0|tank+genet),
   data = all_behavior,
   family = beta_family(),
   weights = n
 )
 model_2 <- glmmTMB(
-  percentmin ~ treatment * genet * day_numeric + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0|genet),
+  percentmin ~ treatment * genet * day_numeric + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0|tank+genet),
   data = all_behavior,
   family = beta_family(),
   weights = n
 )
 model_3 <- glmmTMB(
-  percentmin ~ treatment * genet * day_numeric + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0|treatment+genet),
+  percentmin ~ treatment * genet * day_numeric + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0|tank+genet),
   data = all_behavior,
   family = beta_family(),
   weights = n
@@ -1362,7 +1514,7 @@ model_4 <- glmmTMB(
   weights = n
 )
 
-BIC_compare <- BIC(model_0, model_1, model_2, model_3, model_4, model_5)
+BIC_compare <- BIC(model_0, model_1, model_2, model_3, model_4)
 
 summary(model_4)
 ```
@@ -1406,7 +1558,8 @@ all_permanova <- all %>%
          mhw = ifelse(date <= ymd("2023-12-12"), "during", "after")) %>%
   dplyr::select(day_numeric, date, tank, genet, treatment, mhw, avg_size, avg_size_log, percent_open, percent_fully_open, percent_closed, n, n_true, growth_rate) %>%
   mutate(mhw_treatment = interaction(mhw, treatment),
-         mhw_genet = interaction(mhw, genet))
+         mhw_genet = interaction(mhw, genet),
+         treatment_genet = interaction(treatment, genet))
 
 #response_matrix <- all_permanova[, c("percent_open", "n_true", "avg_size")]
 #distance_matrix <- daisy(response_matrix, metric = "gower")
@@ -1424,7 +1577,7 @@ response_matrix <- all_permanova[, c("percent_open", "n_true", "avg_size_log")]
 distance_matrix <- daisy(response_matrix, metric = "gower")
 
 # check homogeneity of mutlivariate dispersion
-dispersion <- betadisper(distance_matrix, group = all_permanova$genet)
+dispersion <- betadisper(distance_matrix, group = all_permanova$treatment_genet)
 anova(dispersion) #A significant p-value indicates that at least one group has a different dispersion than others.
 #we need to log-transform body size dats because there is no statistically diff dispersion between GENETS 
 permutest(dispersion, pairwise = TRUE) # If the overall ANOVA is significant, this performs pairwise permutation tests to see which specific groups have significantly different dispersions
@@ -1594,7 +1747,7 @@ all_simple <- all %>%
   ungroup() %>%
   filter(case_when(mhw=="during" ~ week %in% c(0, 5, 9),
                    mhw=="after" ~ week %in% c(0, 4, 8))) %>%
-  mutate(mhw_week = interaction(all_simple$mhw, all_simple$week))
+  mutate(mhw_week = interaction(mhw, week))
 
 hist(all_simple$percent_open)
 hist(all_simple$n_true)
@@ -1798,6 +1951,41 @@ AICc.PERMANOVA2 <- function(adonis2.model) {
 AIC1 <- AICc.PERMANOVA2(model1)
 AIC2 <- AICc.PERMANOVA2(model2)
 ```
+
+## Let's run some post-hoc on our "final" model
+
+### pairwise comparisons
+```{r}
+library(pairwiseAdonis)
+model_final <- adonis2(distance_matrix ~ mhw_week+treatment*genet,
+                       data = all_simple,
+                       permutations = 999)
+
+pairwise_results <- pairwise.adonis(
+  x = distance_matrix,
+  factors = all_simple$treatment_genet,
+  sim.method = "gower", # Or the dissimilarity method you used for your distance_matrix
+  p.adjust.m = "BH"     # Benjamini-Hochberg FDR correction (recommended)
+)
+
+pair_sorted <- pairwise_results %>%
+  arrange(p.adjusted) %>%
+  mutate(row_number = row_number())
+
+within_treatment_comparisons <- pairwise_results %>%
+  filter(
+    str_remove(str_split_i(pairs, " vs ", 1), "\\.[A-Z]$") ==
+    str_remove(str_split_i(pairs, " vs ", 2), "\\.[A-Z]$")
+  )
+```
+
+### ANOSIM
+```{r}
+anosim_response <- anosim(distance_matrix, grouping = all_simple$treatment_genet, permutations = 999)
+print(anosim_response)
+summary(anosim_response)
+```
+
 
 # DONE. 
 
