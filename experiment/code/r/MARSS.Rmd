@@ -697,9 +697,17 @@ all_behavior <- all %>%
 
 all_behavior_marss <- all_behavior %>%
   mutate(genet_tank = paste(genet, tank, sep = "_"),
-         number_open = percent_open*100) %>% #only need this if we aren't z-scoring I think
-  select(date, genet_tank, number_open) %>%
-  pivot_wider(names_from = genet_tank, values_from = number_open) %>%
+         number_open = percent_open*100,
+         data_squished = pmin(pmax(percent_open, 0.0001), 1 - 0.0001),
+         transform_percent = log(data_squished / (1 - data_squished)),
+         proportion_open_adjusted = case_when(
+           percent_open == 0 ~ (0.5 / n()), # n() is the number of observations
+           percent_open == 1 ~ (1 - (0.5 / n())),
+           TRUE ~ percent_open),
+         logit_percent_open = log(proportion_open_adjusted / (1 - proportion_open_adjusted)),
+         arcsin_sqrt_percent_open = asin(sqrt(percent_open))) %>%
+  select(date, genet_tank, arcsin_sqrt_percent_open) %>%
+  pivot_wider(names_from = genet_tank, values_from = arcsin_sqrt_percent_open) %>%
   column_to_rownames(var = "date") %>%
   as.matrix() %>%
   t()
