@@ -120,30 +120,37 @@ temp_sorted <- temp_clean %>%
   summarize(avg_temp = mean(temperature, na.rm=TRUE)) %>%
   ungroup() %>%
   filter(timestamp > ymd_hms("2023-09-22 12:00:00"),
-         timestamp < ymd_hms("2024-02-21 10:00:00")) #remove first 24 hours after addition of Corynactis because temperature fluctuations as I was messing around with heaters/chillers
+         timestamp < ymd_hms("2024-02-13 10:00:00")) #remove first 24 hours after addition of Corynactis because temperature fluctuations as I was messing around with heaters/chillers
 
 ggplot(temp_sorted, aes(x=timestamp)) +
-  #geom_line(aes(y=chill_set, color="chill_set"), linetype="dashed") +
-  #geom_line(aes(y=severe_set, color="severe_set"), linetype="dashed") +
-  #geom_line(aes(y=extreme_set, color="extreme_set"), linetype="dashed") +
-  geom_line(aes(y=avg_temp, color=treatment)) +
+  geom_line(aes(y=chill_set, color="chill_set"), linetype="dashed", linewidth=1) +
+  geom_line(aes(y=severe_set, color="severe_set"), linetype="dashed", linewidth=1) +
+  geom_line(aes(y=extreme_set, color="extreme_set"), linetype="dashed", linewidth=1) +
+  geom_line(aes(y=avg_temp, color=treatment), linewidth=1) +
   scale_color_manual(name = "",
-                     values = c("chill" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00"),
-                     labels = c("chill" = "Control", "severe" = "Severe MHW", "extreme" = "Extreme MHW")) +
-#  scale_color_manual(name = "Treatment",
-#                     values = c("chill" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00",
-#                                "chill_set" = "#003D52", "severe_set" = "#C28200", "extreme_set" = "#A53E00"),
-#                     labels = c("chill" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW",
-#                                "chill_set" = "Ambient Set Point", "severe_set" = "Severe Set Point", "extreme_set" = #"Extreme Set Point"),
-#                     guide=guide_legend(override.aes = list(keyheight=10,alpha=1))) +
+                     values = c("chill" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00",
+                                "chill_set" = "#003D52", "severe_set" = "#C28200", "extreme_set" = "#A53E00"),
+                     labels = c("chill" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW",
+                                "chill_set" = "Ambient Set Point", "severe_set" = "Severe Set Point", "extreme_set" = "Extreme Set Point"),
+                       breaks = c("chill", "chill_set", "severe", "severe_set", "extreme", "extreme_set"),
+                     guide = guide_legend(override.aes = list(linewidth = 2.5))) +
+  scale_x_datetime(date_labels = "%b %d", date_breaks = "2 weeks") +
   scale_y_continuous(breaks = seq(12, 26, 2), limits = c(12, 27)) +
   theme_bw() +
   labs(x = "Date",
-       y = "Temperature") +
-  theme(legend.position = "top",
-        text = element_text(size = 20))
+       y = expression("Temperature ("*~degree*C*")")) +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=22),
+        axis.text.y=element_text(size=22),
+        axis.title.x=element_blank(),
+        axis.title.y=element_text(size=24),
+        legend.text=element_text(size=18),
+        legend.title=element_text(size=22),
+        strip.text = element_text(size = 24),
+        strip.background = element_rect(fill="white"),
+        legend.position = "top")
 
-ggsave(here("experiment", "figures", "WSN","avg_temps.png"), width=12, height=7)
+#ggsave(here("experiment", "figures", "dissertation", "avg_temps.png"), height=8, width=12)
 #image <- ggarrange(plot_set, plot_avg, ncol = 1)
 #ggsave(file = here("experiment", "figures", "WSN","avg_temps.svg"), plot = image, width=12, height=9)
 ```
