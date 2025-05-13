@@ -5,41 +5,57 @@ date: "2024-12-09"
 output: html_document
 ---
 
+# Load libraries 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
 library(brms)
 library(lavaan)
-
-```
-Wrangle data
-
-```{r}
-
-all$tank_date <- paste(all$tank, all$date, sep = "_")
-temp_clean$tank_date <- paste(temp_clean$tank, temp_clean$date, sep = "_")
-
-all_temp <- merge(all,
-                  data.frame(temp = temp_clean$avg_temp,
-                             tank_date = temp_clean$tank_date),
-                  by = "tank_date")
-
-all_temp <- all_temp %>% 
-  mutate(date_num = as.numeric(date - as.Date("2023-10-01")))
-
-all_temp$genet <- as.numeric(all_temp$genet)
+library(tidyverse)
 
 ```
 
-Bayes SEM
+# Load data 
+```{r}
+# Uncomment and run these two lines ONE TIME to load temperature/body size data, then save the file to your local machine
+#source("readRPiData.R", local = knitr::knit_global())
+#source("readBodySizeData.R", local = knitr::knit_global())
+
+source("mergeAllData.R", local = knitr::knit_global())
+
+#Load temperature data AFTER you have run source(ReadRPiData)
+rpi_temp <- read_csv(here("experiment", "data", "rpi_temp.csv"))
+weekly_temp <- read_csv(here("experiment", "data", "weekly_temperature.csv"))
+daily_temp <- read_csv(here("experiment", "data", "three_day_temperature.csv")) %>%
+  mutate(date = if_else(date==ymd("2023-09-29"), ymd("2023-10-01"), date),
+         tank = as.factor(tank),
+         treatment = as.factor(if_else(treatment=="chill", "cold", treatment)))
+```
+
+# Wrangle data
 
 ```{r}
+all_temp <- all %>%
+  left_join(daily_temp, by = c("tank", "treatment", "date")) %>%
+  mutate(#tank_date = paste(tank, date, sep = "_"),
+         date_num = as.numeric(date - as.Date("2023-10-01")),
+         genet = as.numeric(genet)) %>%
+  arrange(date_num) %>%
+  group_by(genet) %>%
+  mutate(n_rel = n_true / first(n_true),
+         n_rel_log = log(n_rel)) %>%
+  ungroup()
+```
+
+# Bayes SEM
+
+```{r, eval=FALSE}
 
 # First pass non time-series, Bayesian model
 sem1_rand <- brm(
-  bf(scale(avg_biomass_g) ~ scale(n_true) + scale(temp) + scale(percent_open)) +
-    bf(scale(n_true) ~ scale(temp) + (1|genet)) +
-    bf(scale(percent_open) ~ scale(temp)) + # Pressure is gaussian
+  bf(scale(avg_biomass_g) ~ scale(n_true) + scale(avg_temp) + scale(percent_open)) +
+    bf(scale(n_true) ~ scale(avg_temp) + (1|genet)) +
+    bf(scale(percent_open) ~ scale(avg_temp)) + # Pressure is gaussian
     set_rescor(rescor = FALSE), # Temp is gaussian 
   data = all_temp,
   family = gaussian(), # Variance family for count data w/ zeros
@@ -51,15 +67,17 @@ summary(sem1_rand)
 
 ```
 
-Frequentist SEM
+# Frequentist SEM
 
 ```{r}
 
 # Scale all data
-all_temp$sc_avg_biomass_g <- scale(all_temp$avg_biomass_g)
-all_temp$sc_n_true <- scale(all_temp$n_true)
-all_temp$sc_temp <- scale(all_temp$temp)
-all_temp$sc_percent_open <- scale(all_temp$percent_open)
+all_temp$sc_avg_biomass_g <- scale(all_temp$avg_size) #amelia changed this to mm
+all_temp$sc_n_true <- scale(all_temp$n_rel) #amelia changed this to relative n
+all_temp$sc_temp <- scale(all_temp$avg_temp) #amelia changed this to average temp
+all_temp$sc_percent_open <- scale(all_temp$percent_fully_open) #amelia changed this to %fully open
+
+hist(all_temp$sc_n_true)
 
 # Define sem structure
 sem1_freq <- '
