@@ -12,11 +12,10 @@ knitr::opts_chunk$set(echo = TRUE)
 library(brms)
 library(lavaan)
 library(tidyverse)
-
 ```
 
 # Load data 
-```{r}
+```{r, message=FALSE}
 # Uncomment and run these two lines ONE TIME to load temperature/body size data, then save the file to your local machine
 #source("readRPiData.R", local = knitr::knit_global())
 #source("readBodySizeData.R", local = knitr::knit_global())
@@ -25,7 +24,9 @@ source("mergeAllData.R", local = knitr::knit_global())
 
 #Load temperature data AFTER you have run source(ReadRPiData)
 rpi_temp <- read_csv(here("experiment", "data", "rpi_temp.csv"))
+
 weekly_temp <- read_csv(here("experiment", "data", "weekly_temperature.csv"))
+
 daily_temp <- read_csv(here("experiment", "data", "three_day_temperature.csv")) %>%
   mutate(date = if_else(date==ymd("2023-09-29"), ymd("2023-10-01"), date),
          tank = as.factor(tank),
@@ -37,14 +38,20 @@ daily_temp <- read_csv(here("experiment", "data", "three_day_temperature.csv")) 
 ```{r}
 all_temp <- all %>%
   left_join(daily_temp, by = c("tank", "treatment", "date")) %>%
-  mutate(#tank_date = paste(tank, date, sep = "_"),
+  mutate(tank_date = paste(date, tank, sep = "_"),
+         tank_genet = paste(tank, genet, sep = "_"),
          date_num = as.numeric(date - as.Date("2023-10-01")),
          genet = as.numeric(genet)) %>%
   arrange(date_num) %>%
   group_by(genet) %>%
   mutate(n_rel = n_true / first(n_true),
          n_rel_log = log(n_rel)) %>%
-  ungroup()
+  ungroup() %>%
+  # Scale (z-score) all data
+  mutate(sc_size = scale(avg_size)[, 1], # Amelia changed size to use diameter in mm rather than average biomass in g
+         sc_n = scale(n_rel)[, 1], # Amelia changed this to relative n from true n, to account for differences in starting number of polyps
+         sc_temp = scale(avg_temp)[, 1], # weekly average temperature from previous Sat-Fri
+         sc_behavior = scale(percent_fully_open)[, 1]) # Amelia changed this to %fully open, because that variable is used in other analyses
 ```
 
 # Bayes SEM
@@ -70,21 +77,16 @@ summary(sem1_rand)
 # Frequentist SEM
 
 ```{r}
-
-# Scale all data
-all_temp$sc_avg_biomass_g <- scale(all_temp$avg_size) #amelia changed this to mm
-all_temp$sc_n_true <- scale(all_temp$n_rel) #amelia changed this to relative n
-all_temp$sc_temp <- scale(all_temp$avg_temp) #amelia changed this to average temp
-all_temp$sc_percent_open <- scale(all_temp$percent_fully_open) #amelia changed this to %fully open
-
-hist(all_temp$sc_n_true)
+hist(all_temp$sc_n)
+qqnorm(all_temp$sc_n)
+qqline(all_temp$sc_n)
 
 # Define sem structure
 sem1_freq <- '
   # Regressions
-  sc_avg_biomass_g ~ sc_n_true + sc_temp + sc_percent_open
-  sc_n_true ~ sc_temp + genet
-  sc_percent_open ~ sc_temp
+  sc_size ~ sc_n + sc_temp + sc_behavior
+  sc_n ~ sc_temp + genet
+  sc_behavior ~ sc_temp
   
   # Random effect of genet
   genet ~~ genet
@@ -95,6 +97,58 @@ fit <- sem(sem1_freq, data = all_temp)
 
 # Print summary
 summary(fit, fit.measures = TRUE)
-
 ```
 
+# Multilevel SEM to account for repeated measures (maybe?)
+```{r}
+sem_mlm <- '
+  # within-group
+  level: 1
+  sc_size ~ sc_n + sc_temp + sc_behavior
+  sc_n ~ sc_temp
+  sc_behavior ~ sc_temp
+  
+  # between-groups
+  level: 2
+  sc_size ~ genet
+  sc_n ~ genet
+  sc_behavior ~ genet
+
+  # random genet effect (variation between tank-genet combinations)
+  tank_genet ~~ tank_genet
+'
+
+# Fit the model
+fit_mlm <- sem(sem_mlm, 
+               data = all_temp,
+               cluster = "tank_genet") # this is explicit repeated measures part
+
+summary(fit_mlm, fit.measures = TRUE)
+```
+
+
+## Big draft : try converting genet to dummy variables using genet as fixed effect?
+```{r}
+all_temp$genet <- as.factor(all_temp$genet)
+genet_dummies <- model.matrix(~ genet - 1, data = all_temp)  # Create dummy variables
+all_temp <- cbind(all_temp, genet_dummies) # Add the dummy variables to your dataset
+
+sem_genet <- '
+  # Measurement model
+  sc_size ~ sc_n + sc_temp + sc_behavior
+  sc_n ~ sc_temp
+  sc_behavior ~ sc_temp
+
+  # Species ID influences growth, behavior, and reproduction
+  sc_size ~ genet2 + genet3 + genet4 + genet5
+  sc_n ~ genet2 + genet3 + genet4 + genet5
+  sc_behavior ~ genet2 + genet3 + genet4 + genet5
+'
+
+# Fit the model for multi-group SEM
+fit <- sem(sem_genet, 
+           data = all_temp)
+
+# Check the summary of the fit for each group
+summary(fit)
+```
