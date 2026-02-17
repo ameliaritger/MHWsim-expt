@@ -173,7 +173,7 @@ sem_ar <- '
 # Fit the model
 fit_ar <- sem(sem_ar,
               data = all_temp_ar,
-              cluster = "tank_genet")
+              cluster = "tank_genet") #this handles the random effect
 
 summary(fit_ar, fit.measures = TRUE)
 ```
