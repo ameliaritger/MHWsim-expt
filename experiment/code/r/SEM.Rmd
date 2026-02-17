@@ -43,15 +43,20 @@ all_temp <- all %>%
          date_num = as.numeric(date - as.Date("2023-10-01")),
          genet = as.numeric(genet)) %>%
   arrange(date_num) %>%
-  group_by(genet) %>%
-  mutate(n_rel = n_true / first(n_true),
-         n_rel_log = log(n_rel)) %>%
+  group_by(tank_genet) %>%
+  mutate(n_rel = n_true / first(n_true)) %>% # relative to starting number
   ungroup() %>%
-  # Scale (z-score) all data
+  # Z score all data
   mutate(sc_size = scale(avg_size)[, 1], # Amelia changed size to use diameter in mm rather than average biomass in g
          sc_n = scale(n_rel)[, 1], # Amelia changed this to relative n from true n, to account for differences in starting number of polyps
          sc_temp = scale(avg_temp)[, 1], # weekly average temperature from previous Sat-Fri
-         sc_behavior = scale(percent_fully_open)[, 1]) # Amelia changed this to %fully open, because that variable is used in other analyses
+         sc_behavior = scale(percent_fully_open)[, 1]) %>% # Amelia changed this to %fully open, because that variable is used in other analyses
+  arrange(date) %>% 
+  group_by(tank_genet) %>%
+  mutate(sc_size_lag = ifelse(is.na(sc_size), NA, lag(sc_size, 2)),
+         sc_n_lag = lag(sc_n, 1),
+         sc_behavior_lag = lag(sc_behavior, 1)) %>%
+  ungroup()
 ```
 
 # Bayes SEM
@@ -99,7 +104,7 @@ fit <- sem(sem1_freq, data = all_temp)
 summary(fit, fit.measures = TRUE)
 ```
 
-# Multilevel SEM to account for repeated measures (maybe?)
+## Multilevel SEM to account for repeated measures (maybe?)
 ```{r}
 sem_mlm <- '
   # within-group
@@ -114,7 +119,7 @@ sem_mlm <- '
   sc_n ~ genet
   sc_behavior ~ genet
 
-  # random genet effect (variation between tank-genet combinations)
+  # random effect (variation between tank-genet combinations)
   tank_genet ~~ tank_genet
 '
 
@@ -126,29 +131,165 @@ fit_mlm <- sem(sem_mlm,
 summary(fit_mlm, fit.measures = TRUE)
 ```
 
+## Add a temporal autoregressive component
 
-## Big draft : try converting genet to dummy variables using genet as fixed effect?
+### Make a new df to scale explicitly using tank_genet groupings
 ```{r}
-all_temp$genet <- as.factor(all_temp$genet)
-genet_dummies <- model.matrix(~ genet - 1, data = all_temp)  # Create dummy variables
-all_temp <- cbind(all_temp, genet_dummies) # Add the dummy variables to your dataset
+all_temp_ar <- all %>%
+  left_join(daily_temp, by = c("tank", "treatment", "date")) %>%
+  mutate(tank_date = paste(date, tank, sep = "_"),
+         tank_genet = paste(tank, genet, sep = "_"),
+         date_num = as.numeric(date - as.Date("2023-10-01")),
+         genet = as.numeric(genet)) %>%
+  arrange(date_num) %>%
+  group_by(tank_genet) %>%
+  mutate(n_rel = n_true / first(n_true),
+         sc_size = scale(avg_size)[, 1], # Amelia changed size to use diameter in mm rather than average biomass in g
+         sc_n = scale(n_rel)[, 1], # Amelia changed this to relative n from true n, to account for differences in starting number of polyps
+         sc_temp = scale(avg_temp)[, 1], # weekly average temperature from previous Sat-Fri
+         sc_behavior = scale(percent_fully_open)[, 1], # Amelia changed this to %fully open, because that variable is used in other analyses
+         sc_size_lag = ifelse(is.na(sc_size), NA, lag(sc_size, 2)),
+         sc_size_lag2 = ifelse(is.na(sc_size), NA, lag(sc_size, 4)),
+         sc_n_lag = lag(sc_n, 1),
+         sc_n_lag2 = lag(sc_n, 2),
+         sc_behavior_lag = lag(sc_behavior, 1),
+         sc_behavior_lag2 = lag(sc_behavior, 2)) %>%
+  ungroup()
+```
 
-sem_genet <- '
-  # Measurement model
+### Generate the temporal AR model - *This is the current "final" model*
+```{r}
+sem_ar <- '
   sc_size ~ sc_n + sc_temp + sc_behavior
   sc_n ~ sc_temp
   sc_behavior ~ sc_temp
-
-  # Species ID influences growth, behavior, and reproduction
-  sc_size ~ genet2 + genet3 + genet4 + genet5
-  sc_n ~ genet2 + genet3 + genet4 + genet5
-  sc_behavior ~ genet2 + genet3 + genet4 + genet5
+  
+  # autoregressive path
+  sc_size ~ sc_size_lag # AR correlation = 0.75
+  sc_n ~ sc_n_lag # AR correlation = 0.86
+  sc_behavior ~ sc_behavior_lag # AR correlation is weak but significant
 '
 
-# Fit the model for multi-group SEM
-fit <- sem(sem_genet, 
-           data = all_temp)
+# Fit the model
+fit_ar <- sem(sem_ar,
+              data = all_temp_ar,
+              cluster = "tank_genet")
 
-# Check the summary of the fit for each group
-summary(fit)
+summary(fit_ar, fit.measures = TRUE)
 ```
+
+# Everything below here is what was used to check model parameters
+
+## Here is a multilevel SEM (that is overly complex): 
+```{r}
+sem_mlm_ar <- '
+  # within-group
+  level: 1
+  sc_size ~ sc_n + sc_temp + sc_behavior
+  sc_n ~ sc_temp
+  sc_behavior ~ sc_temp
+  
+  # autoregressive path
+  sc_size ~ sc_size_lag
+  sc_n ~ sc_n_lag
+  sc_behavior ~ sc_behavior_lag
+
+  # between-groups: random intercepts capture baseline diffs
+  level: 2
+  sc_size ~ 1
+  sc_n ~ 1
+  sc_behavior ~ 1
+'
+
+fit_mlm_ar <- sem(sem_mlm_ar, 
+                  data = all_temp_ar,
+                  cluster = "tank_genet")
+```
+
+## Plot up the residuals of the multilevel model
+```{r}
+pred_mat <- lavPredict(fit_ar, type = "ov")
+all_temp_ar$resid_size <- all_temp_ar$sc_size - pred_mat[, "sc_size"]
+all_temp_ar$resid_behavior <- all_temp_ar$sc_behavior - pred_mat[, "sc_behavior"]
+all_temp_ar$resid_n <- all_temp_ar$sc_n - pred_mat[, "sc_n"]
+
+# Residual plots
+ggplot(all_temp_ar, aes(x=sc_n_lag, y=resid_n)) + geom_point() + geom_smooth()
+ggplot(all_temp_ar, aes(x=sc_behavior_lag, y=resid_behavior)) + geom_point() + geom_smooth()
+ggplot(all_temp_ar, aes(x=sc_size_lag, y=resid_size)) + geom_point() + geom_smooth()
+
+# Compare across genets
+ggplot(all_temp_ar, aes(x = factor(genet), y = resid_size)) +
+  geom_violin() +
+    theme_classic() +
+    ylab("Residual sc_size") +
+    xlab("Genet")
+
+ggplot(all_temp_ar, aes(x = factor(genet), y = resid_n)) +
+  geom_violin() +
+    theme_classic() +
+    ylab("Residual sc_n") +
+    xlab("Genet")
+
+ggplot(all_temp_ar, aes(x = factor(genet), y = resid_behavior)) +
+  geom_violin() +
+    theme_classic() +
+    ylab("Residual sc_behavior") +
+    xlab("Genet")
+```
+
+From these plots, indicative that there is 1) temporal autocorrelation with N and Size and 2) there is no meaningful level 2 genet variation, so multilevel SEM doesn't appear necessary (plus the SEM variances at level 2 are very nearly 0). From checking model parameters including lag2, the added complexity doesn't result in a significantly improved model (most of the parameter estimates don't change).
+
+```{r}
+# 1️⃣ Get predicted values and residuals
+pred_mat <- lavPredict(fit_ar, type = "ov")
+
+all_temp_ar <- all_temp_ar %>%
+  mutate(
+    resid_size     = sc_size - pred_mat[, "sc_size"],
+    resid_n        = sc_n - pred_mat[, "sc_n"],
+    resid_behavior = sc_behavior - pred_mat[, "sc_behavior"]
+  )
+
+# 2️⃣ Gather residuals and lags into long format for easy plotting
+resid_long <- all_temp_ar %>%
+  select(genet, tank_genet,
+         resid_size, resid_n, resid_behavior,
+         sc_size_lag, sc_size_lag2,
+         sc_n_lag, sc_n_lag2,
+         sc_behavior_lag, sc_behavior_lag2) %>%
+  pivot_longer(
+    cols = starts_with("resid"),
+    names_to = "variable",
+    values_to = "residual"
+  ) %>%
+  mutate(
+    lag1 = case_when(
+      variable == "resid_size"     ~ sc_size_lag,
+      variable == "resid_n"        ~ sc_n_lag,
+      variable == "resid_behavior" ~ sc_behavior_lag
+    ),
+    lag2 = case_when(
+      variable == "resid_size"     ~ sc_size_lag2,
+      variable == "resid_n"        ~ sc_n_lag2,
+      variable == "resid_behavior" ~ sc_behavior_lag2
+    )
+  )
+
+# 3️⃣ Plot residuals vs lag1 and lag2
+ggplot(resid_long, aes(x = lag1, y = residual)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", color = "blue") +
+  facet_wrap(~variable, scales = "free_x") +
+  labs(title = "Residuals vs Lag1 (AR1 check)",
+       x = "Lag1", y = "Residual")
+
+df <- all_temp_ar %>%
+  group_by(tank_genet) %>%
+  summarise(
+    acf_size = list(acf(na.omit(sc_size), plot = FALSE)$acf),
+    acf_n = list(acf(na.omit(sc_n), plot = FALSE)$acf),
+    acf_behavior = list(acf(na.omit(sc_behavior), plot = FALSE)$acf))
+```
+
+Residual plots are still funky but adding tons of lag (e.g. lag 7) is the only way to improve, but I only have 40 dates in the timeseries so lag 7 ultimately doesn't make sense for this dataset.
