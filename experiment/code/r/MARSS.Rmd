@@ -81,7 +81,7 @@ temp_covariate <- weekly_temp %>%
   t()
 ```
 
-## Prep  body size data
+## Prep body size data
 ```{r}
 all_size <- all %>%
   filter(!is.na(avg_size),
@@ -480,45 +480,41 @@ for (j in 1:75) {
         xlab = "")
     abline(h = 0)
     title(paste(rownames(marss_data)[j]))
-    }
-```
-
-Red flags with the correlation matrix, so let's try hypothesis 3
-
-### Check out the best performing model for H3 (Q=diagonal and equal, U=equal)
-```{r, eval=FALSE}
-Z = matrix(0, nrow = 75, ncol = 5)
-C = matrix(list(0), 5, 15)
-
-Z <- fill_staggered_ones(Z, 1:75, 1:5)
-colnames(Z) <- c("genetA", "genetB", "genetC", "genetD", "genetE")
-for (i in 1:nrow(C)) {
-  C[i, ] <- rep(letters[i], ncol(C))
 }
 
-model_list <- list(
-      B = "identity",
-      U = "equal",
-      Q = "diagonal and equal",
-      Z = Z,
-      A = "zero",  # DO NOT CHANGE!
-      R = "diagonal and equal",  # DO NOT CHANGE!
-      C = C,
-      c = temp_covariate,
-      tinitx = 0)
+boot_results <- MARSSboot(fit_marss_indv, nboot = 5, silent = TRUE)
+```
 
-fit_marss_indv <- MARSS(y = marss_data, model = model_list, silent = TRUE, control = list(maxit = 5000))
-fit_marss_indv
+```{r}
+# Convert boot.params to matrix if not already
+boot_mat <- as.matrix(boot_results$boot.params)
 
-MARSSparamCIs(fit_marss_indv)
-plot.pars(fit_marss_indv)
-resids <- MARSSresiduals(fit_marss_indv, type = "tt1")
-for (j in 1:75) {
-    plot(resids$model.residuals[j, ], ylab = "model residuals", 
-        xlab = "")
-    abline(h = 0)
-    title(paste(rownames(marss_data)[j]))
-    }
+# Compute summary stats
+param_names <- rownames(boot_mat)
+point_estimates <- apply(boot_mat, 1, mean)
+lower_ci <- apply(boot_mat, 1, quantile, probs = 0.025)
+upper_ci <- apply(boot_mat, 1, quantile, probs = 0.975)
+
+# Combine into a dataframe for plotting
+plot_df <- data.frame(
+  Parameter = param_names,
+  Estimate = point_estimates,
+  CI_lower = lower_ci,
+  CI_upper = upper_ci
+)
+
+# Optional: group into categories like environmental, density-dependence, etc.
+plot_df$Group <- ifelse(grepl("ambient|severe|extreme", plot_df$Parameter), "Environmental",
+                 ifelse(grepl("U\\.1", plot_df$Parameter), "Density", "Other"))
+
+ggplot(plot_df, aes(x = reorder(Parameter, Estimate), y = Estimate, color = Group)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper), width = 0.2) +
+  coord_flip() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+  theme_minimal() +
+  labs(x = "Parameter", y = "Estimate ± 95% CI", title = "Bootstrap Estimates with 95% CIs") +
+  facet_wrap(~Group, scales = "free_y")
 ```
 
 # Population growth
@@ -541,6 +537,8 @@ temp_covariate <- daily_temp %>%
 ```
 
 ## Prep reproduction data
+**could do relative to starting number too  mutate(n_rel = n_true / first(n_true))**
+
 ```{r}
 all_repro <- all %>%
   filter(date >= ymd("2023-10-06"),
@@ -687,6 +685,8 @@ temp_covariate <- daily_temp %>%
 ```
 
 ## Prep behavior data
+**for other analyses I used percent_fully_open, so might want to switch to that ultimately**
+
 ```{r}
 all_behavior <- all %>%
   filter(date >= ymd("2023-10-06"),
@@ -787,7 +787,7 @@ marss_results %>%
 
 H5 diagonal and unequal did not converge for either U - even with 10k iterations. Why? (TBD, let's roll with it though)
 
-                  
+
 --------------------------------------------------------------------------------
 
 # Everything below this is "old" (but reference it if needed)
