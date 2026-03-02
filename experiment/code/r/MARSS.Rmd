@@ -751,18 +751,6 @@ Z_models <- list(
 names(Z_models) <- c("all_same", "diff_treat", "diff_genet", "mhw_same", "amb_ext_same", "AE_BCD", "AE_B_C_D", "ambExt_AE_BCD") #, "heatwave_recovery") #, "all_diff")
 ```
 
-#### Hypotheses
-- H1: All genets and all treatments are the same
-- H2: All genets are the same but each treatment is different
-- H3: All treatments are the same but each genet is different
-- H4: All genets are the same and both MHW treatments are the same, but different from control treatment
-- H5: All genets are the same and the extreme MHW is the same as the control treatment (post-hoc hypothesis, - based off figures)
-- H6: All treatments are the same, and genets A/E are the same and genets B/C/D are the same (post-hoc - hypothesis, based off figures)
-- H7: All treatments are the same, and genets A/E are the same (post-hoc hypothesis, alternative to H6)
-- H8: The exterme MHW is the same as the control treatment, and genets A/E are the same and genets B/C/D are the same (post-hoc hypothesis, alternative to H5:H8)
-- H9: (Do not use!) All genets and all treatments are different
-- H10: The heatwave period was different from the recovery period 
-
 #### -------------- Notes from WSN 2024:
 - C matrix - all numeric matrix, 1 column -> This doesn't work though, and needs to be same dimensions as c matrix
 - c matrix = temp covariate 
