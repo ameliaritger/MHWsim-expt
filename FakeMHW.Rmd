@@ -1,0 +1,154 @@
+---
+title: "Fake MHW profile - Exit Seminar"
+author: "Amelia Ritger"
+date: "2025-05-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(here)
+```
+
+#create temp profile
+```{r}
+# Days 0 to 42
+days <- 0:42
+
+# Control treatment (always 0°C)
+control_temp <- rep(0, length(days))
+control <- data.frame(
+  Day = days,
+  Treatment = "Control",
+  Temperature = control_temp
+)
+
+# +3.5 C treatment
+temp_treatment <- c(
+  rep(0, 11),                # Days 0–10
+  seq(0.5, 3.5, by = 0.5),   # Days 11–17 (ramp up)
+  rep(3.5, 13),              # Days 18–30 (hold)
+  seq(3.0, 0, by = -0.5),    # Days 31–37 (ramp down)
+  rep(0, 5)                  # Days 38–42 (hold at 0)
+)
+
+treatment <- data.frame(
+  Day = days,
+  Treatment = "+3.5 C",
+  Temperature = temp_treatment
+)
+
+# Combine both treatments
+temperature_profile <- rbind(control, treatment)
+```
+
+# plot it
+```{r}
+temperature_profile$Treatment <- factor(temperature_profile$Treatment, levels = c("Control", "+3.5 C"))
+
+ggplot(temperature_profile, aes(x = Day, y = Temperature, color = Treatment)) +
+  geom_line(aes(linetype = Treatment), size = 1.2) +
+  geom_vline(xintercept = 10, linetype = "dotted", color = "black", size = 1) +  # Line at x = 11
+  geom_vline(xintercept = 30, linetype = "dotted", color = "black", size = 1) +  # Line at x = 31
+  annotate("text",x = 15, y = 1.75,label = "0.5°C/day",color = "black",size = 4,fontface = "italic",angle = 75) +
+  labs(x = "Day", y = expression(Delta~"Temperature (°C)"), color = "", linetype="") +
+  scale_color_manual(values = c("Control" = "black", "+3.5 C" = "#086788"), labels = c("Control", expression("+3.5"~degree*C))) +
+  scale_linetype_manual(values = c("Control" = "dashed", "+3.5 C" = "solid"), labels = c("Control", expression("+3.5"~degree*C))) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, size = 16),
+        legend.position = "bottom",
+        text = element_text(size = 18), 
+        axis.title.y = element_text(size = 18),
+        axis.title.x = element_text(size = 18))
+
+#ggsave(here("experiment", "figures", "dissertation", "Atkinson2020.png"), width = 5.5, height = 4)
+```
+
+# Let's do another MHW scenario
+```{r}
+# Define days from 0 to 16
+days <- 0:19
+
+# Control treatment (always 0°C)
+control_temp <- rep(0, length(days))
+control <- data.frame(
+  Day = days,
+  Treatment = "Control",
+  Temperature = control_temp
+)
+
+# +3.5°C treatment: step changes
+# Day 0–2: 3.5°C
+# Day 3–6: 0°C
+# Day 7–9: 3.5°C
+# Day 10–14: 0°C
+
+treatment_temp <- c(
+  rep(0, 5),      # Days 0–1
+  rep(4, 3),    # Days 2–4
+  rep(0, 4),      # Days 5–8
+  rep(4, 3),    # Days 9–11
+  rep(0, 5)       # Days 12–16
+)
+
+treatment <- data.frame(
+  Day = days,
+  Treatment = "+4 C",
+  Temperature = treatment_temp
+)
+
+# Combine both treatments
+temperature_profile <- rbind(control, treatment)
+```
+
+# Plot it
+```{r}
+# Ensure correct factor level order for plotting (Control plotted second, +4 C first)
+temperature_profile$Treatment <- factor(
+  temperature_profile$Treatment,
+  levels = c("+4 C", "Control")  # Plot: +4 C first, Control second
+)
+
+# Plot
+ggplot() +
+  # Plot +4 C treatment first
+  geom_step(
+    data = subset(temperature_profile, Treatment == "+4 C"),
+    aes(x = Day, y = Temperature, color = Treatment, linetype = Treatment),
+    size = 1.2
+  ) +
+  # Plot Control treatment second (on top)
+  geom_step(
+    data = subset(temperature_profile, Treatment == "Control"),
+    aes(x = Day, y = Temperature, color = Treatment, linetype = Treatment),
+    size = 1.2
+  ) +
+  # Manual scales for color and linetype
+  scale_color_manual(
+    values = c("+4 C" = "#086788", "Control" = "black"),
+    labels = c(expression("+4"~degree*C), "Control")
+  ) +
+  scale_linetype_manual(
+    values = c("+4 C" = "solid", "Control" = "dashed"),
+    labels = c(expression("+4"~degree*C), "Control")
+  ) +
+  # Reorder the legend so that Control appears first
+  #guides() +
+  labs(
+    x = "Time (d)",
+    y = expression(Delta~"Temperature (°C)"),
+    color = "", linetype = ""
+  ) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    legend.position = "bottom",
+    text = element_text(size = 18),
+    axis.title.y = element_text(size = 18),
+    axis.title.x = element_text(size = 18)
+  )
+
+#ggsave(here("experiment", "figures", "dissertation", "He2021.png"), width = 5.5, height = 4)
+```
+

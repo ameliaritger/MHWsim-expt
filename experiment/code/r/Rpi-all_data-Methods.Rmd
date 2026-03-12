@@ -351,7 +351,9 @@ temp_compare <- temp_down %>%
 
 #get the difference between the two data
 temp_compare <- temp_compare %>%
-  mutate(diff = round(avg_temp - avg_temp_sub, 3))
+  mutate(diff = round(avg_temp - avg_temp_sub, 3),
+         above_below = ifelse(diff > 0, "above", 
+                              ifelse(diff< 0, "below", "equal")))
 
 mean(temp_compare$diff)
 sd(temp_compare$diff)
@@ -360,8 +362,9 @@ sd(temp_compare$diff)
 hours <- as.numeric(difftime(max(temp_compare$timestamp), min(temp_compare$timestamp), units="hours"))
 
 #plot the data
-image <- ggplot(temp_compare, aes(x=timestamp)) +
-  geom_point(aes(y=diff), color="black", size=1) +
+ggplot(temp_compare, aes(x=timestamp)) +
+  geom_line(aes(y=0), color="black", size=1, linetype="dashed") +
+  geom_point(aes(y=diff, color=above_below, shape=above_below), size=1.5) +
   #geom_point(aes(y=avg_temp_hobo), color="red", size=1) +
   #geom_point(aes(y=avg_temp_sub), color="green", size=1) +
   scale_x_datetime(date_labels = "%b %d - %H:%M",
@@ -370,6 +373,10 @@ image <- ggplot(temp_compare, aes(x=timestamp)) +
                    limits = c(min(hobo_data$timestamp),
                               max(hobo_data$timestamp))) +
   scale_y_continuous(limits = c(-0.045, 0.02), breaks = seq(-0.04, 0.02, by = 0.02)) +
+  scale_color_manual(values = c("above" = "#0072B2", "below" = "#D55E00", equal="#E69F00"),
+                     labels = c("above" = "DS18B20 > HOBO", "below" = "DS18B20 < HOBO", "equal" = "DS18B20 = HOBO")) +
+  scale_shape_manual(values = c("above" = 17, "below" = 15, equal=16),
+                     labels = c("above" = "DS18B20 > HOBO", "below" = "DS18B20 < HOBO", "equal" = "DS18B20 = HOBO")) +
   labs(y = expression(paste("Temperature difference (", degree, "C)")),
        x = "Date and time") +
   theme_bw() +
@@ -377,9 +384,15 @@ image <- ggplot(temp_compare, aes(x=timestamp)) +
         axis.text.y=element_text(size=14),
         axis.title.x=element_text(size=18),
         axis.title.y=element_text(size=18),
-        legend.position="top")
+        legend.title=element_blank(),
+        legend.text=element_text(size=14),
+        legend.position="top") +
+  guides(
+  color = guide_legend(override.aes = list(size = 3)),
+  shape = guide_legend(override.aes = list(size = 3))
+)
   
-#ggsave(here("experiment", "figures", "methodsPub", "hoboTempDiff.png"), width=12, height=6)
+#ggsave(here("experiment", "figures", "dissertation", "hoboTempDiff.png"), width=8, height=5)
 #ggsave(file = here("experiment", "figures", "methodsPub","hoboTempDiff.svg"), plot = image, width=12, height=6)
 
 ```

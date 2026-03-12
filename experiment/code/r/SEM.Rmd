@@ -36,13 +36,15 @@ daily_temp <- read_csv(here("experiment", "data", "three_day_temperature.csv")) 
 # Wrangle data
 
 ```{r}
-all_temp <- all %>%
+all_clean <- all %>%
   left_join(daily_temp, by = c("tank", "treatment", "date")) %>%
   mutate(tank_date = paste(date, tank, sep = "_"),
          tank_genet = paste(tank, genet, sep = "_"),
          date_num = as.numeric(date - as.Date("2023-10-01")),
          genet = as.numeric(genet)) %>%
-  arrange(date_num) %>%
+    arrange(date_num)
+
+all_temp <- all_clean %>%
   group_by(tank_genet) %>%
   mutate(n_rel = n_true / first(n_true)) %>% # relative to starting number
   ungroup() %>%
@@ -135,19 +137,13 @@ summary(fit_mlm, fit.measures = TRUE)
 
 ### Make a new df to scale explicitly using tank_genet groupings
 ```{r}
-all_temp_ar <- all %>%
-  left_join(daily_temp, by = c("tank", "treatment", "date")) %>%
-  mutate(tank_date = paste(date, tank, sep = "_"),
-         tank_genet = paste(tank, genet, sep = "_"),
-         date_num = as.numeric(date - as.Date("2023-10-01")),
-         genet = as.numeric(genet)) %>%
-  arrange(date_num) %>%
+all_ar <- all_clean %>%
   group_by(tank_genet) %>%
   mutate(n_rel = n_true / first(n_true),
-         sc_size = scale(avg_size)[, 1], # Amelia changed size to use diameter in mm rather than average biomass in g
-         sc_n = scale(n_rel)[, 1], # Amelia changed this to relative n from true n, to account for differences in starting number of polyps
-         sc_temp = scale(avg_temp)[, 1], # weekly average temperature from previous Sat-Fri
-         sc_behavior = scale(percent_fully_open)[, 1], # Amelia changed this to %fully open, because that variable is used in other analyses
+         sc_size = scale(avg_size)[, 1],
+         sc_n = scale(n_rel)[, 1],
+         sc_temp = scale(avg_temp)[, 1],
+         sc_behavior = scale(percent_fully_open)[, 1],
          sc_size_lag = ifelse(is.na(sc_size), NA, lag(sc_size, 2)),
          sc_size_lag2 = ifelse(is.na(sc_size), NA, lag(sc_size, 4)),
          sc_n_lag = lag(sc_n, 1),
@@ -160,7 +156,7 @@ all_temp_ar <- all %>%
 ### Generate the temporal AR model - *This is the current "final" model*
 ```{r}
 sem_ar <- '
-  sc_size ~ sc_n + sc_temp + sc_behavior
+  sc_size ~ sc_temp + sc_n + sc_behavior
   sc_n ~ sc_temp
   sc_behavior ~ sc_temp
   
@@ -172,11 +168,82 @@ sem_ar <- '
 
 # Fit the model
 fit_ar <- sem(sem_ar,
-              data = all_temp_ar,
+              data = all_ar,
               cluster = "tank_genet") #this handles the random effect
 
 summary(fit_ar, fit.measures = TRUE)
 ```
+
+### Alternatively, don't scale() the variables and have lavaan sem() handle the standardization
+```{r}
+all_raw <- all_clean %>%
+  group_by(tank_genet) %>%
+  mutate(n_rel = n_true / first(n_true),
+         sc_size = avg_size,
+         sc_n = n_rel,
+         sc_temp = avg_temp,
+         sc_behavior = percent_fully_open,
+         sc_size_lag = ifelse(is.na(sc_size), NA, lag(sc_size, 2)),
+         sc_size_lag2 = ifelse(is.na(sc_size), NA, lag(sc_size, 4)),
+         sc_n_lag = lag(sc_n, 1),
+         sc_n_lag2 = lag(sc_n, 2),
+         sc_behavior_lag = lag(sc_behavior, 1),
+         sc_behavior_lag2 = lag(sc_behavior, 2)) %>%
+  ungroup()
+
+sem_raw <- '
+  sc_size ~ sc_temp + sc_n + sc_behavior
+  sc_n ~ sc_temp
+  sc_behavior ~ sc_temp
+  
+  # autoregressive path
+  sc_size ~ sc_size_lag # AR correlation = 0.75
+  sc_n ~ sc_n_lag # AR correlation = 0.86
+  sc_behavior ~ sc_behavior_lag # AR correlation is weak but significant
+'
+
+# Fit the model
+fit_raw <- sem(sem_raw,
+              data = all_raw,
+              cluster = "tank_genet") #this handles the random effect
+
+summary(fit_raw, fit.measures = TRUE, standardized=TRUE)
+```
+
+## And now try a Multilevel AR based on ChatGPT suggestions
+
+```{r}
+sem_ml <- '
+  level: 1 #within tank
+    # contemporaneous effects
+    sc_size ~ sc_temp + sc_n + sc_behavior
+    sc_n ~ sc_temp
+    sc_behavior ~ sc_temp
+
+    # autoregressive paths (within-tank stability)
+    sc_size ~ sc_size_lag
+    sc_n ~ sc_n_lag
+    sc_behavior ~ sc_behavior_lag
+
+  level: 2  # between tanks 
+    sc_size ~ sc_temp
+    sc_n ~ sc_temp
+    sc_behavior ~ sc_temp
+    
+  # random intercept variances
+    sc_size ~~ sc_size
+    sc_n ~~ sc_n
+    sc_behavior ~~ sc_behavior
+    sc_temp ~~ sc_temp
+'
+
+fit_ml <- sem(sem_ml,
+              data = all_raw,
+              cluster = "tank_genet")
+
+summary(fit_ml, fit.measures = TRUE, standardized=TRUE)
+```
+
 
 # Everything below here is what was used to check model parameters
 
@@ -202,36 +269,36 @@ sem_mlm_ar <- '
 '
 
 fit_mlm_ar <- sem(sem_mlm_ar, 
-                  data = all_temp_ar,
+                  data = all_ar,
                   cluster = "tank_genet")
 ```
 
 ## Plot up the residuals of the multilevel model
 ```{r}
 pred_mat <- lavPredict(fit_ar, type = "ov")
-all_temp_ar$resid_size <- all_temp_ar$sc_size - pred_mat[, "sc_size"]
-all_temp_ar$resid_behavior <- all_temp_ar$sc_behavior - pred_mat[, "sc_behavior"]
-all_temp_ar$resid_n <- all_temp_ar$sc_n - pred_mat[, "sc_n"]
+all_ar$resid_size <- all_ar$sc_size - pred_mat[, "sc_size"]
+all_ar$resid_behavior <- all_ar$sc_behavior - pred_mat[, "sc_behavior"]
+all_ar$resid_n <- all_ar$sc_n - pred_mat[, "sc_n"]
 
 # Residual plots
-ggplot(all_temp_ar, aes(x=sc_n_lag, y=resid_n)) + geom_point() + geom_smooth()
-ggplot(all_temp_ar, aes(x=sc_behavior_lag, y=resid_behavior)) + geom_point() + geom_smooth()
-ggplot(all_temp_ar, aes(x=sc_size_lag, y=resid_size)) + geom_point() + geom_smooth()
+ggplot(all_ar, aes(x=sc_n_lag, y=resid_n)) + geom_point() + geom_smooth()
+ggplot(all_ar, aes(x=sc_behavior_lag, y=resid_behavior)) + geom_point() + geom_smooth()
+ggplot(all_ar, aes(x=sc_size_lag, y=resid_size)) + geom_point() + geom_smooth()
 
 # Compare across genets
-ggplot(all_temp_ar, aes(x = factor(genet), y = resid_size)) +
+ggplot(all_ar, aes(x = factor(genet), y = resid_size)) +
   geom_violin() +
     theme_classic() +
     ylab("Residual sc_size") +
     xlab("Genet")
 
-ggplot(all_temp_ar, aes(x = factor(genet), y = resid_n)) +
+ggplot(all_ar, aes(x = factor(genet), y = resid_n)) +
   geom_violin() +
     theme_classic() +
     ylab("Residual sc_n") +
     xlab("Genet")
 
-ggplot(all_temp_ar, aes(x = factor(genet), y = resid_behavior)) +
+ggplot(all_ar, aes(x = factor(genet), y = resid_behavior)) +
   geom_violin() +
     theme_classic() +
     ylab("Residual sc_behavior") +
@@ -244,7 +311,7 @@ From these plots, indicative that there is 1) temporal autocorrelation with N an
 # 1️⃣ Get predicted values and residuals
 pred_mat <- lavPredict(fit_ar, type = "ov")
 
-all_temp_ar <- all_temp_ar %>%
+all_ar <- all_ar %>%
   mutate(
     resid_size     = sc_size - pred_mat[, "sc_size"],
     resid_n        = sc_n - pred_mat[, "sc_n"],
@@ -252,7 +319,7 @@ all_temp_ar <- all_temp_ar %>%
   )
 
 # 2️⃣ Gather residuals and lags into long format for easy plotting
-resid_long <- all_temp_ar %>%
+resid_long <- all_ar %>%
   select(genet, tank_genet,
          resid_size, resid_n, resid_behavior,
          sc_size_lag, sc_size_lag2,
@@ -284,7 +351,7 @@ ggplot(resid_long, aes(x = lag1, y = residual)) +
   labs(title = "Residuals vs Lag1 (AR1 check)",
        x = "Lag1", y = "Residual")
 
-df <- all_temp_ar %>%
+df <- all_ar %>%
   group_by(tank_genet) %>%
   summarise(
     acf_size = list(acf(na.omit(sc_size), plot = FALSE)$acf),

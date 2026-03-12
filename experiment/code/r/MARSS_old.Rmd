@@ -1,0 +1,1158 @@
+---
+title: "MARSS"
+author: "Amelia Ritger"
+date: "2024-11-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(MARSS)
+```
+
+# Load data
+```{r}
+source("mergeAllData.R", local = knitr::knit_global())
+#source("readRPiData.R", local = knitr::knit_global()) # Load temperature data AFTER you have uncommented and run this line
+weekly_temp <- read_csv(here("experiment", "data", "weekly_temperature.csv"))
+daily_temp <- read_csv(here("experiment", "data", "three_day_temperature.csv"))
+
+end_mhw <- ymd("2023-12-12")
+```
+
+# Functions
+```{r}
+# For plotting parameters
+plot.pars <- function(fit) {
+    df <- broom::tidy(fit)
+    df$parameter <- sapply(df$term, function(x) {
+        stringr::str_split(x, "[.]")[[1]][1]
+    })
+    df$parameter[df$parameter %in% c("R", "Q")] <- "R and Q"
+    ggplot2::ggplot(df, ggplot2::aes(x = term, y = estimate)) + 
+        ggplot2::geom_point() + ggplot2::geom_errorbar(ggplot2::aes(ymin = conf.low, 
+        ymax = conf.up), width = 0.2) + geom_hline(yintercept = 0, 
+        col = "blue") + facet_wrap(~parameter, scales = "free")
+}
+
+# For generating H3/H5 Z matrices - staggered 1 values across specific rows and columns
+fill_staggered_ones <- function(Z, rows, cols) { #Fill staggered 1s across specified rows/cols
+  rows_to_apply <- intersect(rows, 1:nrow(Z))   # Ensure the row numbers are within the bounds of the matrix
+  for (col in cols) { # Loop over the specified columns
+    start_row <- col  # Stagger the starting row for each column
+    for (i in seq(start_row, max(rows_to_apply), by = 5)) {
+      if (i %in% rows_to_apply) {
+        Z[i, col] <- 1
+      }
+    }
+  }
+  return(Z)
+}
+```
+
+#### Hypotheses
+- H1: All genets and all treatments are the same
+- H2: All genets are the same but each treatment is different
+- H3: All treatments are the same but each genet is different
+- H4: All genets are the same and both MHW treatments are the same, but different from control treatment
+- H5: All genets are the same and the extreme MHW is the same as the control treatment (post-hoc hypothesis, - based off figures)
+- H6: All treatments are the same, and genets A/E are the same and genets B/C/D are the same (post-hoc - hypothesis, based off figures)
+- H7: All treatments are the same, and genets A/E are the same (post-hoc hypothesis, alternative to H6)
+- H8: The exterme MHW is the same as the control treatment, and genets A/E are the same and genets B/C/D are the same (post-hoc hypothesis, alternative to H5:H8)
+- H9: All genets and all treatments are different
+
+# Body size 
+
+## Generate temp covariate matrix - ONLY for MHW times
+```{r}
+temp_covariate <- weekly_temp %>%
+  filter(friday < ymd("2024-02-16"),
+         friday <= end_mhw) %>%
+  arrange(friday, tank) %>%
+  #slice(rep(1:n(), each = 5)) %>%
+  #mutate(tank_rep = paste0(tank, letters[1:5][rep(1:5, times = n()/5)])) %>%
+  select(tank, friday, avg_temp) %>%
+  pivot_wider(names_from = tank, values_from = avg_temp) %>%
+  mutate(week = row_number()) %>%
+  select(-friday) %>%
+  column_to_rownames(var = "week") %>%
+  as.matrix() %>%
+  t()
+```
+
+## Prep body size data
+```{r}
+all_size <- all %>%
+  filter(!is.na(avg_size),
+         date <= end_mhw) %>%
+  mutate(week = as.numeric(difftime(date, min(weekly_temp$friday), units = "weeks")) + 1,
+         avg_size_log = log(avg_size),
+         sd_size_log = log(sd_size),
+         tank = as.numeric(tank)) %>%
+  select(date, week, tank, mhw, genet, avg_size_log) %>%
+  left_join(weekly_temp, by = c("date" = "friday", "tank"))
+
+all_size_marss <- all_size %>%
+  mutate(genet_tank = paste(genet, tank, sep = "_")) %>%
+  select(-date, -tank, -genet, -mhw, -treatment, -avg_temp, -min_temp, -max_temp) %>%
+  pivot_wider(names_from = genet_tank, values_from = avg_size_log) %>%
+  column_to_rownames(var = "week") %>%
+  as.matrix() %>%
+  t()
+
+marss_data <- all_size_marss
+```
+
+## Hypothesis 2: All genets are the same but each treatment is different 
+```{r, eval=FALSE}
+Z <- matrix(0, nrow = 75, ncol = 3) # Fill in the matrix # First 25 rows get a 1 in column 1 (treatment 1) 
+Z[1:25, 1] <- 1 # Next 25 rows (26-50) get a 1 in column 2 (treatment 2) 
+Z[26:50, 2] <- 1 # Last 25 rows (51-75) get a 1 in column 3 (treatment 3) 
+Z[51:75, 3] <- 1 # Optional: Name the columns for clarity 
+colnames(Z) <- c("treatment 1", "treatment 2", "treatment 3")
+
+C = matrix(list(0), 3, 15)
+C[1, 1:5] <- "treatment1"
+C[2, 6:10] <- "treatment2"
+C[3, 11:15] <- "treatment3"
+
+mod_list <- list(
+  B = "identity",
+  U = "unequal",
+  Q = "diagonal and unequal",
+  Z = Z,
+  A = "zero",
+  R = "diagonal and equal",
+  C = C,
+  c = temp_covariate,
+  tinitx=0)
+
+fit_marss <- MARSS(y=marss_data, model = mod_list, silent=TRUE, control = list(maxit = 5000))
+
+out_indv <- data.frame(logLik = fit_marss$logLik, 
+                  AICc = fit_marss$AICc, num.param = fit_marss$num.params, 
+                  num.iter = fit_marss$numIter, converged = !fit_marss$convergence)
+out_indv
+MARSSparamCIs(fit_marss)
+plot.pars(fit_marss)
+
+#resids <- MARSSresiduals(fit_indv_alt, type = "tt1")
+#for (j in 1:75) {
+#    plot(resids$model.residuals[j, ], ylab = "model residuals", 
+#        xlab = "")
+#    abline(h = 0)
+#    title(paste(rownames(marss_data)[j]))
+#    }
+```
+
+### Let's create a "quick" for loop running through options of Q and U with this:
+```{r, eval=FALSE}
+parameter_combinations <- expand.grid(
+  #R = c("identity", "unequal", "zero", "diagonal and unequal", "diagonal and equal"),
+  Q = c("diagonal and unequal", "diagonal and equal"),
+  U = c("unequal", "equal", "zero"),
+  stringsAsFactors = FALSE
+)
+
+# Create an empty data frame to store the results
+results <- data.frame(
+  logLik = numeric(), 
+  AICc = numeric(), 
+  num.param = numeric(),
+  num.iter = numeric(), 
+  converged = logical(),
+  Q = character(), U = character(),  # Add model parameter labels
+  stringsAsFactors = FALSE
+)
+
+# Loop over each combination of parameters
+for (i in 1:nrow(parameter_combinations)) {
+  # Extract the current combination of parameters
+  current_params <- parameter_combinations[i, ]
+  
+  # Create the mod_list with current parameter values
+  mod_list_loop <- list(
+    B = "identity",
+    U = current_params$U,
+    Q = current_params$Q,
+    Z = Z,
+    A = "zero",  # DO NOT CHANGE!
+    R = "diagonal and equal",  # DO NOT CHANGE!
+    C = C,
+    c = temp_covariate,
+    tinitx = 0)
+
+    # Fit the MARSS model
+  fit_marss <- MARSS(y = marss_data, model = mod_list_loop, silent = TRUE, control = list(maxit = 5000))
+  
+  # Extract relevant output
+  out_indv <- data.frame(
+    Q = current_params$Q, U = current_params$U,
+    logLik = fit_marss$logLik, 
+    AICc = fit_marss$AICc, 
+    num.param = fit_marss$num.params, 
+    num.iter = fit_marss$numIter, 
+    converged = !fit_marss$convergence
+  )
+  
+  # Append the results to the results data frame
+  results <- rbind(results, out_indv)
+}
+
+results <- results %>%
+  mutate(hypothesis = "H2")
+
+# save results as .csv
+#write_csv(results, here("experiment", "data", "marss_output", "H2.csv"))
+```
+
+## Hypothesis 1: All genets and all treatments are the same
+```{r, eval=FALSE}
+Z <- matrix(1, nrow = 75, ncol = 1)
+colnames(Z) <- c("all same")
+
+C = matrix(list(1), 1, 15)
+
+mod_list <- list(
+  B = "identity",
+  U = "unequal",
+  Q = "diagonal and unequal",
+  Z = Z,
+  A = "zero",
+  R = "diagonal and equal",
+  C = C,
+  c = temp_covariate,
+  tinitx=0)
+
+fit_marss <- MARSS(y=marss_data, model = mod_list, silent=TRUE, control = list(maxit = 5000))
+
+out_indv <- data.frame(logLik = fit_indv_alt$logLik, 
+                  AICc = fit_indv_alt$AICc, num.param = fit_indv_alt$num.params, 
+                  num.iter = fit_indv_alt$numIter, converged = !fit_indv_alt$convergence)
+out_indv
+MARSSparamCIs(fit_indv_alt)
+plot.pars(fit_indv_alt)
+```
+
+### For loop
+```{r, eval=FALSE}
+parameter_combinations <- expand.grid(
+  Q = c("diagonal and unequal", "diagonal and equal"),
+  U = c("unequal", "equal", "zero"),
+  stringsAsFactors = FALSE
+)
+
+# Create an empty data frame to store the results
+results <- data.frame(
+  logLik = numeric(), 
+  AICc = numeric(), 
+  num.param = numeric(),
+  num.iter = numeric(), 
+  converged = logical(),
+  Q = character(), U = character(),  # Add model parameter labels
+  stringsAsFactors = FALSE
+)
+
+# Loop over each combination of parameters
+for (i in 1:nrow(parameter_combinations)) {
+  # Extract the current combination of parameters
+  current_params <- parameter_combinations[i, ]
+  
+  # Create the mod_list with current parameter values
+  mod_list_loop <- list(
+    B = "identity",
+    U = current_params$U,
+    Q = current_params$Q,
+    Z = Z,
+    A = "zero",  # DO NOT CHANGE!
+    R = "diagonal and equal",  # DO NOT CHANGE!
+    C = C,
+    c = temp_covariate,
+    tinitx = 0)
+
+    # Fit the MARSS model
+  fit_marss <- MARSS(y = marss_data, model = mod_list_loop, silent = TRUE, control = list(maxit = 5000))
+  
+  # Extract relevant output
+  out_indv <- data.frame(
+    Q = current_params$Q, U = current_params$U,
+    logLik = fit_marss$logLik, 
+    AICc = fit_marss$AICc, 
+    num.param = fit_marss$num.params, 
+    num.iter = fit_marss$numIter, 
+    converged = !fit_marss$convergence
+  )
+  
+  # Append the results to the results data frame
+  results <- rbind(results, out_indv)
+}
+
+results <- results %>%
+  mutate(hypothesis = "H1")
+
+# save results as .csv
+#write_csv(results, here("experiment", "data", "marss_output", "H1.csv"))
+```
+
+
+## Let's try one big for loop where we test different combos of Z/C, Q and U...
+
+# Generate the Q and U comparisons and the list of hypotheses
+```{r}
+parameter_combinations <- expand.grid(
+  Q = c("diagonal and unequal", "diagonal and equal"),
+  U = c("unequal", "equal"), #U should not be zero because our data are not de-meaned
+  stringsAsFactors = FALSE
+)
+
+zc_matrix_list <- list(
+  H1 = list(Z = matrix(1, nrow = 75, ncol = 1), C = matrix(list(1), 1, 15)), #all genets and all treatments are the same
+  H2 = list(Z = matrix(0, nrow = 75, ncol = 3), C = matrix(list(0), 3, 15)), #all genets are the same, all treatments are different
+  H3 = list(Z = matrix(0, nrow = 75, ncol = 5), C = matrix(list(0), 5, 15)), #all genets are different, all treatments are different
+  H4 = list(Z = matrix(0, nrow = 75, ncol = 2), C = matrix(list(0), 2, 15)), #all genets are the same, MHW treatments are different from control
+  H5 = list(Z = matrix(0, nrow = 75, ncol = 15), C = matrix(list(0), 15, 15)) #all genets and all treatments are different 
+)
+
+# H2: All treatments are different -> Z (75x3), C (3x15)
+zc_matrix_list$H2$Z[1:25, 1] <- 1  # Treatment 1
+zc_matrix_list$H2$Z[26:50, 2] <- 1  # Treatment 2
+zc_matrix_list$H2$Z[51:75, 3] <- 1  # Treatment 3
+colnames(zc_matrix_list$H2$Z) <- c("treatment 1", "treatment 2", "treatment 3")
+zc_matrix_list$H2$C[1, 1:5] <- "treatment1"
+zc_matrix_list$H2$C[2, 6:10] <- "treatment2"
+zc_matrix_list$H2$C[3, 11:15] <- "treatment3"
+
+# H3: All genets are different -> Z (75x5), C (5x15)
+# #fill_staggered_ones <- function(Z, cols) {
+#   for (col in cols) {
+#     start_row <- col  # Stagger the starting row for each column
+#     for (i in seq(start_row, nrow(Z), by = 5)) {
+#       Z[i, col] <- 1
+#     }
+#   }
+#   return(Z)
+# }
+zc_matrix_list$H3$Z <- fill_staggered_ones(zc_matrix_list$H3$Z, 1:75, 1:5)
+colnames(zc_matrix_list$H3$Z) <- c("genetA", "genetB", "genetC", "genetD", "genetE")
+for (i in 1:nrow(zc_matrix_list$H3$C)) {
+  zc_matrix_list$H3$C[i, ] <- rep(letters[i], ncol(zc_matrix_list$H3$C))
+}
+
+# H4: MHW treatments are different from control -> Z (75x2), C (2x15)
+zc_matrix_list$H4$Z[1:25, 1] <- 1  # Treatment 1
+zc_matrix_list$H4$Z[26:75, 2] <- 1  # Treatment 2
+colnames(zc_matrix_list$H4$Z) <- c("ambient", "mhw")
+zc_matrix_list$H4$C[1, 1:5] <- "ambient"
+zc_matrix_list$H4$C[2, 6:15] <- "mhw"
+
+# H5: All genets and all treatments are different -> Z (75x15), C (15x15)
+zc_matrix_list$H5$Z <- fill_staggered_ones(zc_matrix_list$H5$Z,1:25, 1:5)
+zc_matrix_list$H5$Z <- fill_staggered_ones(zc_matrix_list$H5$Z,26:50, 6:10)
+zc_matrix_list$H5$Z <- fill_staggered_ones(zc_matrix_list$H5$Z,51:75, 11:15)
+colnames(zc_matrix_list$H5$Z) <- c("amb_A", "amb_B", "amb_C", "amb_D", "amb_E",
+                                   "sev_A", "sev_B", "sev_C", "sev_D", "sev_E",
+                                   "ext_A", "ext_B", "ext_C", "ext_D", "ext_E")
+for (i in 1:nrow(zc_matrix_list$H5$C)) {
+  letter_index <- (i - 1) %% 5 + 1  # This ensures we loop through 'a' to 'e'
+  letter <- letters[letter_index]  # Get the current genet
+    if (i >= 1 & i <= 5) {
+    suffix <- "ambient_"
+  } else if (i >= 6 & i <= 10) {
+    suffix <- "severe_"
+  } else if (i >= 11 & i <= 15) {
+    suffix <- "extreme_"
+  } else {
+    suffix <- ""
+  }
+  zc_matrix_list$H5$C[i, ] <- rep(paste(suffix, letter, sep = ""), 15)
+}
+```
+
+### Run the for loop to test each Q and U with each hypothesis (Z/C matrix)
+```{r, eval=FALSE}
+marss_results <- data.frame(
+  logLik = numeric(), 
+  AICc = numeric(), 
+  num.param = numeric(),
+  num.iter = numeric(), 
+  converged = logical(),
+  Q = character(), U = character(),  # Add model parameter labels
+  Z_group = character(), C_group = character(),  # To track Z and C combinations
+  stringsAsFactors = FALSE
+)
+
+# Loop over each combination of Z and C
+for (hypothesis_number in names(zc_matrix_list)) {
+  # Extract the current Z and C combination
+  Z <- zc_matrix_list[[hypothesis_number]]$Z
+  C <- zc_matrix_list[[hypothesis_number]]$C
+  
+  # Loop over each combination of parameters (Q and U)
+  for (i in 1:nrow(parameter_combinations)) {
+    # Extract the current combination of parameters for Q and U
+    current_params <- parameter_combinations[i, ]
+    
+    # Create the mod_list with current parameter values
+    mod_list_loop <- list(
+      B = "identity",
+      U = current_params$U,
+      Q = current_params$Q,
+      Z = Z,
+      A = "zero",  # DO NOT CHANGE!
+      R = "diagonal and equal",  # DO NOT CHANGE!
+      C = C,
+      c = temp_covariate,
+      tinitx = 0
+    )
+    
+    # Fit the MARSS model
+    fit_marss <- MARSS(y = marss_data, model = mod_list_loop, silent = TRUE, control = list(maxit = 5000))
+    
+    # Extract relevant output
+    out_indv <- data.frame(
+      Hypothesis = hypothesis_number, Q = current_params$Q, U = current_params$U,
+      logLik = fit_marss$logLik, 
+      AICc = fit_marss$AICc, 
+      num.param = fit_marss$num.params, 
+      num.iter = fit_marss$numIter, 
+      converged = !fit_marss$convergence
+    )
+    
+    # Append the results to the results data frame
+    marss_results <- rbind(marss_results, out_indv)
+  }
+}
+
+marss_results %>%
+  arrange(AICc)
+```
+
+### Check out the best performing model for H5 (Q=diagonal and equal, U=equal)
+```{r, eval=FALSE}
+Z <- matrix(0, nrow = 75, ncol = 15)
+C <- matrix(list(0), 15, 15)
+  
+Z <- fill_staggered_ones(Z,1:25, 1:5)
+Z <- fill_staggered_ones(Z,26:50, 6:10)
+Z <- fill_staggered_ones(Z,51:75, 11:15)
+colnames(zc_matrix_list$H5$Z) <- c("amb_A", "amb_B", "amb_C", "amb_D", "amb_E",
+                                   "sev_A", "sev_B", "sev_C", "sev_D", "sev_E",
+                                   "ext_A", "ext_B", "ext_C", "ext_D", "ext_E")
+
+for (i in 1:nrow(C)) {
+  letter_index <- (i - 1) %% 5 + 1  # This ensures we loop through 'a' to 'e'
+  letter <- letters[letter_index]  # Get the current genet
+    if (i >= 1 & i <= 5) {
+    suffix <- "ambient_"
+  } else if (i >= 6 & i <= 10) {
+    suffix <- "severe_"
+  } else if (i >= 11 & i <= 15) {
+    suffix <- "extreme_"
+  } else {
+    suffix <- ""
+  }
+  C[i, ] <- rep(paste(suffix, letter, sep = ""), 15)
+}
+
+model_list <- list(
+      B = "identity",
+      U = "equal",
+      Q = "diagonal and equal",
+      Z = Z,
+      A = "zero",  # DO NOT CHANGE!
+      R = "diagonal and equal",  # DO NOT CHANGE!
+      C = C,
+      c = temp_covariate,
+      tinitx = 0)
+
+fit_marss_indv <- MARSS(y = marss_data, model = model_list, silent = TRUE, control = list(maxit = 5000))
+fit_marss_indv
+MARSSparamCIs(fit_marss_indv)
+plot.pars(fit_marss_indv)
+
+Q.est <- coef(fit_marss_indv, type = "matrix")$Q
+corrplot::corrplot(cov2cor(Q.est))
+
+resids <- MARSSresiduals(fit_marss_indv, type = "tt1")
+for (j in 1:75) {
+    plot(resids$model.residuals[j, ], ylab = "model residuals", 
+        xlab = "")
+    abline(h = 0)
+    title(paste(rownames(marss_data)[j]))
+}
+
+boot_results <- MARSSboot(fit_marss_indv, nboot = 5, silent = TRUE)
+```
+
+```{r}
+# Convert boot.params to matrix if not already
+boot_mat <- as.matrix(boot_results$boot.params)
+
+# Compute summary stats
+param_names <- rownames(boot_mat)
+point_estimates <- apply(boot_mat, 1, mean)
+lower_ci <- apply(boot_mat, 1, quantile, probs = 0.025)
+upper_ci <- apply(boot_mat, 1, quantile, probs = 0.975)
+
+# Combine into a dataframe for plotting
+plot_df <- data.frame(
+  Parameter = param_names,
+  Estimate = point_estimates,
+  CI_lower = lower_ci,
+  CI_upper = upper_ci
+)
+
+# Optional: group into categories like environmental, density-dependence, etc.
+plot_df$Group <- ifelse(grepl("ambient|severe|extreme", plot_df$Parameter), "Environmental",
+                 ifelse(grepl("U\\.1", plot_df$Parameter), "Density", "Other"))
+
+ggplot(plot_df, aes(x = reorder(Parameter, Estimate), y = Estimate, color = Group)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper), width = 0.2) +
+  coord_flip() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+  theme_minimal() +
+  labs(x = "Parameter", y = "Estimate ± 95% CI", title = "Bootstrap Estimates with 95% CIs") +
+  facet_wrap(~Group, scales = "free_y")
+```
+
+# Population growth
+
+## Generate temp covariate matrix - ONLY for MHW times
+```{r}
+temp_covariate <- daily_temp %>%
+  filter(date >= ymd("2023-10-06"),
+         date < ymd("2024-02-16"),
+         date <= end_mhw) %>%
+  arrange(date, tank) %>%
+  mutate(avg_temp = avg_temp_last_3_days) %>%
+  select(tank, date, avg_temp) %>%
+  pivot_wider(names_from = tank, values_from = avg_temp) %>%
+  mutate(day = row_number()) %>%
+  select(-date) %>%
+  column_to_rownames(var = "day") %>%
+  as.matrix() %>%
+  t()
+```
+
+## Prep reproduction data
+**could do relative to starting number too  mutate(n_rel = n_true / first(n_true))**
+
+```{r}
+all_repro <- all %>%
+  filter(date >= ymd("2023-10-06"),
+                    date <= end_mhw) %>%
+  mutate(#week = as.numeric(difftime(date, min(weekly_temp$friday), units = "weeks")) + 1,
+         #avg_size_log = log(avg_size),
+         #sd_size_log = log(sd_size),
+         tank = as.numeric(tank)) %>%
+  select(date, tank, mhw, genet, n_true) %>%
+  left_join(daily_temp, by = c("date", "tank"))
+
+all_repro_marss <- all_repro %>%
+  mutate(genet_tank = paste(genet, tank, sep = "_")) %>%
+  select(date, genet_tank, n_true) %>%
+  #select(-date, -tank, -genet, -mhw, -treatment, -avg_temp, -min_temp, -max_temp) %>%
+  pivot_wider(names_from = genet_tank, values_from = n_true) %>%
+  column_to_rownames(var = "date") %>%
+  as.matrix() %>%
+  t()
+
+marss_data <- all_repro_marss
+```
+
+## Run the for loop to test each Q and U with each hypothesis (Z/C matrix)
+```{r, eval=FALSE}
+marss_results <- data.frame(
+  logLik = numeric(), 
+  AICc = numeric(), 
+  num.param = numeric(),
+  num.iter = numeric(), 
+  converged = logical(),
+  Q = character(), U = character(),  # Add model parameter labels
+  Z_group = character(), C_group = character(),  # To track Z and C combinations
+  stringsAsFactors = FALSE
+)
+
+# Loop over each combination of Z and C
+for (hypothesis_number in names(zc_matrix_list)) {
+  # Extract the current Z and C combination
+  Z <- zc_matrix_list[[hypothesis_number]]$Z
+  C <- zc_matrix_list[[hypothesis_number]]$C
+  
+  # Loop over each combination of parameters (Q and U)
+  for (i in 1:nrow(parameter_combinations)) {
+    # Extract the current combination of parameters for Q and U
+    current_params <- parameter_combinations[i, ]
+    
+    # Create the mod_list with current parameter values
+    mod_list_loop <- list(
+      B = "identity",
+      U = current_params$U,
+      Q = current_params$Q,
+      Z = Z,
+      A = "zero",  # DO NOT CHANGE!
+      R = "diagonal and equal",  # DO NOT CHANGE!
+      C = C,
+      c = temp_covariate,
+      tinitx = 0
+    )
+    
+    # Fit the MARSS model
+    fit_marss <- MARSS(y = marss_data, model = mod_list_loop, silent = TRUE, control = list(maxit = 5000))
+    
+    # Extract relevant output
+    out_indv <- data.frame(
+      Hypothesis = hypothesis_number, Q = current_params$Q, U = current_params$U,
+      logLik = fit_marss$logLik, 
+      AICc = fit_marss$AICc, 
+      num.param = fit_marss$num.params, 
+      num.iter = fit_marss$numIter, 
+      converged = !fit_marss$convergence
+    )
+    
+    # Append the results to the results data frame
+    marss_results <- rbind(marss_results, out_indv)
+  }
+}
+
+marss_results %>%
+  arrange(AICc)
+```
+
+Did not converge: Check why?
+- H2, Q = diagonal and unequal
+- H3, Q = diagonal and unequal
+- H4, Q = diagonal and unequal, unequal (but equal converged in 38 iterations!)
+- H5, Q = diagonal and unequal
+
+Q is important but not super important to my Q (process error variance - every tank has different inherent variation, and there is justification for diagonal and equal bc no tank variation) - so stick with diagonal and equal Q. we want to not test variation at tank level, but with Z/C. 
+
+U is inherent directional increase/decrease. Equal  
+
+
+### Check Q = diagonal and unequal convergence issue using H3 as an example
+```{r}
+Z = matrix(0, nrow = 75, ncol = 5)
+C = matrix(list(0), 5, 15)
+
+Z <- fill_staggered_ones(Z, 1:75, 1:5)
+colnames(Z) <- c("genetA", "genetB", "genetC", "genetD", "genetE")
+for (i in 1:nrow(C)) {
+  C[i, ] <- rep(letters[i], ncol(C))
+}
+
+model_list <- list(
+      B = "identity",
+      U = "equal",
+      Q = "diagonal and unequal",
+      Z = Z,
+      A = "zero",  # DO NOT CHANGE!
+      R = "diagonal and equal",  # DO NOT CHANGE!
+      C = C,
+      c = temp_covariate,
+      tinitx = 0)
+
+fit_marss_indv <- MARSS(y = marss_data, model = model_list, silent = TRUE, control = list(maxit = 10000))
+fit_marss_indv
+
+MARSSparamCIs(fit_marss_indv)
+plot.pars(fit_marss_indv)
+resids <- MARSSresiduals(fit_marss_indv, type = "tt1")
+for (j in 1:75) {
+    plot(resids$model.residuals[j, ], ylab = "model residuals", 
+        xlab = "")
+    abline(h = 0)
+    title(paste(rownames(marss_data)[j]))
+    }
+```
+
+Model still doesn't converge even after 10k iterations...
+
+# Behavior 
+
+## Generate temp covariate matrix - ONLY for MHW times
+```{r}
+temp_covariate <- daily_temp %>%
+  filter(date >= ymd("2023-10-06"),
+         date < ymd("2024-02-16"),
+         date <= end_mhw) %>%
+  arrange(date, tank) %>%
+  mutate(avg_temp = avg_temp_last_3_days) %>%
+  select(tank, date, avg_temp) %>%
+  pivot_wider(names_from = tank, values_from = avg_temp) %>%
+  mutate(day = row_number()) %>%
+  select(-date) %>%
+  column_to_rownames(var = "day") %>%
+  as.matrix() %>%
+  t()
+```
+
+## Prep behavior data
+**for other analyses I used percent_fully_open, so might want to switch to that ultimately**
+
+```{r}
+all_behavior <- all %>%
+  filter(date >= ymd("2023-10-06"),
+                    date <= end_mhw) %>%
+  mutate(tank = as.numeric(tank)) %>%
+  select(date, tank, mhw, genet, percent_open) %>%
+  left_join(daily_temp, by = c("date", "tank"))
+
+all_behavior_marss <- all_behavior %>%
+  mutate(genet_tank = paste(genet, tank, sep = "_"),
+         number_open = percent_open*100,
+         data_squished = pmin(pmax(percent_open, 0.0001), 1 - 0.0001),
+         transform_percent = log(data_squished / (1 - data_squished)),
+         proportion_open_adjusted = case_when(
+           percent_open == 0 ~ (0.5 / n()), # n() is the number of observations
+           percent_open == 1 ~ (1 - (0.5 / n())),
+           TRUE ~ percent_open),
+         logit_percent_open = log(proportion_open_adjusted / (1 - proportion_open_adjusted)),
+         arcsin_sqrt_percent_open = asin(sqrt(percent_open))) %>%
+  select(date, genet_tank, arcsin_sqrt_percent_open) %>%
+  pivot_wider(names_from = genet_tank, values_from = arcsin_sqrt_percent_open) %>%
+  column_to_rownames(var = "date") %>%
+  as.matrix() %>%
+  t()
+
+marss_data <- all_behavior_marss
+```
+
+### Z-score the data (BECAUSE)
+```{r, eval=FALSE}
+the.mean <- apply(marss_data, 1, mean)
+the.sigma <- sqrt(apply(marss_data, 1, var))
+marss_data_z <- (marss_data - the.mean) * (1/the.sigma)
+
+the.mean <- apply(temp_covariate, 1, mean)
+the.sigma <- sqrt(apply(temp_covariate, 1, var))
+temp_covariate_z <- (temp_covariate - the.mean) * (1/the.sigma)
+```
+
+## Run the for loop to test each Q with each hypothesis (Z/C matrix)
+```{r, eval=FALSE}
+marss_results <- data.frame(
+  logLik = numeric(), 
+  AICc = numeric(), 
+  num.param = numeric(),
+  num.iter = numeric(), 
+  converged = logical(),
+  Q = character(), U = character(),  # Add model parameter labels
+  Z_group = character(), C_group = character(),  # To track Z and C combinations
+  stringsAsFactors = FALSE
+)
+
+# Loop over each combination of Z and C
+for (hypothesis_number in names(zc_matrix_list)) {
+  # Extract the current Z and C combination
+  Z <- zc_matrix_list[[hypothesis_number]]$Z
+  C <- zc_matrix_list[[hypothesis_number]]$C
+  
+  # Loop over each combination of parameters (Q and U)
+  for (i in 1:nrow(parameter_combinations)) {
+    # Extract the current combination of parameters for Q and U
+    current_params <- parameter_combinations[i, ]
+    
+    # Create the mod_list with current parameter values
+    mod_list_loop <- list(
+      B = "identity",
+      U = current_params$U,
+      Q = current_params$Q,
+      Z = Z,
+      A = "zero",  # DO NOT CHANGE!
+      R = "diagonal and equal",  # DO NOT CHANGE!
+      C = C,
+      c = temp_covariate,
+      tinitx = 0
+    )
+    
+    # Fit the MARSS model
+    fit_marss <- MARSS(y = marss_data, model = mod_list_loop, silent = TRUE, control = list(maxit = 5000))
+    
+    # Extract relevant output
+    out_indv <- data.frame(
+      Hypothesis = hypothesis_number, Q = current_params$Q, U = current_params$U,
+      logLik = fit_marss$logLik, 
+      AICc = fit_marss$AICc, 
+      num.param = fit_marss$num.params, 
+      num.iter = fit_marss$numIter, 
+      converged = !fit_marss$convergence
+    )
+    
+    # Append the results to the results data frame
+    marss_results <- rbind(marss_results, out_indv)
+  }
+}
+
+marss_results %>%
+  arrange(AICc)
+```
+
+H5 diagonal and unequal did not converge for either U - even with 10k iterations. Why? (TBD, let's roll with it though)
+
+
+--------------------------------------------------------------------------------
+
+# Everything below this is "old" (but reference it if needed)
+
+# Make matrices
+
+## Make C, c matrices - temperature covariate (15 tanks, 5 genets in each tank)
+```{r}
+temp_covariate <- weekly_temp %>%
+  filter(friday < ymd("2024-02-16")) %>%
+  arrange(friday, tank) %>%
+  #slice(rep(1:n(), each = 5)) %>%
+  #mutate(tank_rep = paste0(tank, letters[1:5][rep(1:5, times = n()/5)])) %>%
+  select(tank, friday, avg_temp) %>%
+  pivot_wider(names_from = tank, values_from = avg_temp) %>%
+  mutate(week = row_number()) %>%
+  select(-friday) %>%
+  column_to_rownames(var = "week") %>%
+  as.matrix() %>%
+  t()
+
+C_matrix <- matrix(factor(paste("tank", rep(1:15, each = 1), sep = "")), ncol = 1)
+#3x15 matrix
+```
+
+## Make Z matrix list. Might need to incorporate that # cols = # treatments, because then I need to change C matrix dimensions and resolve underconstrained issues with Z, B matrices
+```{r}
+Z_models <- list(
+  H1 = matrix(factor(rep(1, 75))),
+  H2 = matrix(factor(c(rep("amb", 25), rep("sev", 25), rep("ext", 25)))),
+  H3 = matrix(factor(rep(c("A", "B", "C", "D", "E"), 15))),
+  H4 = matrix(factor(c(rep("amb", 25), rep("mhw", 50)))),
+  H5 = matrix(factor(c(rep("amb", 25), rep("sev", 25), rep("amb", 25)))), # post-hoc hypothesis
+  H6 = matrix(factor(rep(c("gen1", "gen2", "gen2", "gen2", "gen1"), 15))), # post-hoc hypothesis
+  H7 = matrix(factor(rep(c("gen1", "gen2", "gen3", "gen4", "gen1"), 15))), # post-hoc hypothesis
+  H8 = matrix(factor(c(rep(c("amb_gen1", "amb_gen2", "amb_gen2", "amb_gen2", "amb_gen1"), 5),
+                     rep(c("sev_gen1", "sev_gen2", "sev_gen2", "sev_gen2", "sev_gen1"),5),
+                     rep(c("amb_gen1", "amb_gen2", "amb_gen2", "amb_gen2", "amb_gen1"), 5)))))
+
+names(Z_models) <- c("all_same", "diff_treat", "diff_genet", "mhw_same", "amb_ext_same", "AE_BCD", "AE_B_C_D", "ambExt_AE_BCD") #, "heatwave_recovery") #, "all_diff")
+```
+
+#### Hypotheses
+- H1: All genets and all treatments are the same
+- H2: All genets are the same but each treatment is different
+- H3: All treatments are the same but each genet is different
+- H4: All genets are the same and both MHW treatments are the same, but different from control treatment
+- H5: All genets are the same and the extreme MHW is the same as the control treatment (post-hoc hypothesis, - based off figures)
+- H6: All treatments are the same, and genets A/E are the same and genets B/C/D are the same (post-hoc - hypothesis, based off figures)
+- H7: All treatments are the same, and genets A/E are the same (post-hoc hypothesis, alternative to H6)
+- H8: The exterme MHW is the same as the control treatment, and genets A/E are the same and genets B/C/D are the same (post-hoc hypothesis, alternative to H5:H8)
+- H9: (Do not use!) All genets and all treatments are different
+- H10: The heatwave period was different from the recovery period 
+
+#### -------------- Notes from WSN 2024:
+- C matrix - all numeric matrix, 1 column -> This doesn't work though, and needs to be same dimensions as c matrix
+- c matrix = temp covariate 
+- B = Identity, random walk
+- Z = CUSTOM matrix, the hypotheses
+- A = A_matrix?
+- R = diagonal and equal #identity?
+- U = unequal?
+- Q = diagonal and equal?
+
+#### -------------- My old OG MARSS model with notes:
+- B = "identity", #pretty sure this is right. Could also be diagonal and unequal or diagonal and equal though.
+- U = "zero", #unequal has worse AIC/BIC -  [[ONLY WORKS IF Z SCORE DATA]]
+- Q = "diagonal and equal", #All tanks have same mixing (but are not correlated, hence diagonal); random walk diagonal and unequal has worse AIC/BIC (and that would mean diff mixing between tanks - but check this with "new" model)
+- Z = "placeholder",
+- A = "zero", # SET TO ZERO! (according to Robert)
+- R = "diagonal and equal", #observation errors are independent and equally distributed!
+
+## Set up model list
+```{r}
+mod_list <- list(
+  B = "identity", #MAYBE diagonal and equal or diagonal and unequal because body growth over time is autocorrelated, however both these options don't converge
+  U = "unequal",
+  Q = "diagonal and equal", #MAYBE diagonal and unequal if water mixing in each tank is different (but unlikely)
+  Z = "placeholder",
+  A = "zero",
+  R = "diagonal and equal",
+  C = C_matrix,
+  c = temp_covariate)
+```
+
+# Body size 
+
+## Prep  data
+```{r}
+all_size <- all %>%
+  filter(!is.na(avg_size)) %>%
+  mutate(week = as.numeric(difftime(date, min(weekly_temp$friday), units = "weeks")) + 1,
+         avg_size_log = log(avg_size),
+         sd_size_log = log(sd_size),
+         tank = as.numeric(tank)) %>%
+  select(date, week, tank, mhw, genet, avg_size_log) %>%
+  left_join(weekly_temp, by = c("date" = "friday", "tank"))
+
+all_size_marss <- all_size %>%
+  mutate(genet_tank = paste(genet, tank, sep = "_")) %>%
+  select(-date, -tank, -genet, -mhw, -treatment, -avg_temp, -min_temp, -max_temp) %>%
+  pivot_wider(names_from = genet_tank, values_from = avg_size_log) %>%
+  column_to_rownames(var = "week") %>%
+  as.matrix() %>%
+  t()
+
+marss_data <- all_size_marss
+```
+
+#Set up function for plotting parameters
+```{r}
+plot.pars <- function(fit) {
+    df <- broom::tidy(fit)
+    df$parameter <- sapply(df$term, function(x) {
+        stringr::str_split(x, "[.]")[[1]][1]
+    })
+    df$parameter[df$parameter %in% c("R", "Q")] <- "R and Q"
+    ggplot2::ggplot(df, ggplot2::aes(x = term, y = estimate)) + 
+        ggplot2::geom_point() + ggplot2::geom_errorbar(ggplot2::aes(ymin = conf.low, 
+        ymax = conf.up), width = 0.2) + geom_hline(yintercept = 0, 
+        col = "blue") + facet_wrap(~parameter, scales = "free")
+}
+```
+
+# Loop through Z matrix models 
+```{r, eval=FALSE}
+out.tab <- NULL
+fits <- list()
+
+for (i in 1:length(Z_models)) {
+    mod_list$Z <- Z_models[[i]]
+    fit <- MARSS(y=marss_data, model = mod_list, silent = TRUE, 
+        control = list(maxit = 5000))
+    out <- data.frame(H = names(Z_models)[i], logLik = fit$logLik, 
+        AICc = fit$AICc, num.param = fit$num.params, m = length(unique(Z_models[[i]])), 
+        num.iter = fit$numIter, converged = !fit$convergence)
+    out.tab <- rbind(out.tab, out)
+    fits <- c(fits, list(fit))
+}
+
+print(out.tab) #looking for: higher log likelihood, lower AIC
+
+for (i in 1:length(fits)) {
+  par(mfrow = c(2, 3))
+  resids <- MARSSresiduals(fits[[i]], type = "tt1")
+  for (j in 1:15) {
+    plot(resids$model.residuals[j, ], ylab = "model residuals", 
+        xlab = "")
+    abline(h = 0)
+    title(paste(names(Z_models[i]), ":", rownames(marss_data)[j]))
+    }
+}
+
+# Plots 1 (xtT) & 2 (fitted.ytT): Do fitted values seem reasonable?
+# Plot 3 (model.resids.ytt1): Do resids have temporal patterns? Do 95% of resids fall withing the CIs?
+# Plot 4 (std.model.resids.ytT): Do resids have temporal patterns? Do 95% of resids fall withing the CIs?
+# Plot 5 (std.state.resids.xtT): Any outliers?
+# Plots 6 & 7 (qqplot.std.model.resids.ytt1: Are resids normal (straight line)?
+# Plot 8 (acf.std.model.resids.ytt1): Do resids have temporal autocorrelation?
+```
+
+#### The residual plots are not looking great... and they're essentially the same across all models(??) 
+
+## Alternative Z/C matrices
+```{r}
+Z <- matrix(0, nrow = 75, ncol = 3) # Fill in the matrix # First 25 rows get a 1 in column 1 (treatment 1) 
+Z[1:25, 1] <- 1 # Next 25 rows (26-50) get a 1 in column 2 (treatment 2) 
+Z[26:50, 2] <- 1 # Last 25 rows (51-75) get a 1 in column 3 (treatment 3) 
+Z[51:75, 3] <- 1 # Optional: Name the columns for clarity 
+colnames(Z) <- c("treatment 1", "treatment 2", "treatment 3")
+
+C = matrix(list(0), 3, 15)
+C[1, 1:5] <- "treatment1" # Next 25 rows (26-50) get a 1 in column 2 (treatment 2) 
+C[2, 5:10] <- "treatment2" # Last 25 rows (51-75) get a 1 in column 3 (treatment 3) 
+C[3, 11:15] <- "treatment3" # Optional: Name the columns for clarity 
+
+mod_list_alt <- list(
+  B = "identity",
+  U = "unequal",
+  Q = "diagonal and unequal",
+  Z = Z,
+  A = "zero",
+  R = "diagonal and equal",
+  C = C,
+  c = temp_covariate,
+  tinitx=0)
+
+fit_indv_alt <- MARSS(y=marss_data, model = mod_list_alt, silent=TRUE, control = list(maxit = 5000))
+fit_indv_alt
+
+out_indv <- data.frame(logLik = fit_indv_alt$logLik, 
+                  AICc = fit_indv_alt$AICc, num.param = fit_indv_alt$num.params, 
+                  num.iter = fit_indv_alt$numIter, converged = !fit_indv_alt$convergence)
+
+#broom::tidy(fit_indv_alt)
+MARSSparamCIs(fit_indv_alt)
+plot.pars(fit_indv_alt)
+
+resids <- MARSSresiduals(fit_indv_alt, type = "tt1")
+for (j in 1:75) {
+    plot(resids$model.residuals[j, ], ylab = "model residuals", 
+        xlab = "")
+    abline(h = 0)
+    title(paste(rownames(marss_data)[j]))
+    }
+```
+
+# DON'T RUN BELOW, WE DON'T WANT TO ZSCORE THE DATA
+# Generate the z-scored data
+```{r}
+the.mean <- apply(marss_data, 1, mean)
+the.sigma <- sqrt(apply(marss_data, 1, var))
+marss_data_z <- (marss_data - the.mean) * (1/the.sigma)
+
+the.mean <- apply(temp_covariate, 1, mean)
+the.sigma <- sqrt(apply(temp_covariate, 1, var))
+temp_covariate_z <- (temp_covariate - the.mean) * (1/the.sigma)
+```
+
+## Model the z-scored data
+```{r}
+mod_list_z <- list(
+  B = "diagonal and equal", #identity is another option, but models have lower logLik and higher AICc; random walk diagonal and unequal gives same model output
+  U = "zero", #note: unequal doesn't converge even after 5k iterations
+  Q = "diagonal and equal", #All tanks have same mixing (also, random walk diagonal and unequal is the same AICc and very close Q estimates)
+  Z = "placeholder",
+  A = "zero", #because data have been z-scored
+  R = "diagonal and equal", #observation errors are independent and have equal variances, because there was only ONE sampler (me)
+  C = C_matrix,
+  c = temp_covariate_z)
+
+out_tab_z <- NULL
+fits_z <- list()
+for (i in 1:length(Z_models)) {
+    mod_list_z$Z <- Z_models[[i]]
+    fit <- MARSS(y=marss_data_z, model = mod_list_z, silent = TRUE, 
+        control = list(maxit = 5000))
+    #print(fit)
+    out <- data.frame(H = names(Z_models)[i], logLik = fit$logLik, 
+        AICc = fit$AICc, num.param = fit$num.params, m = length(unique(Z_models[[i]])), 
+        num.iter = fit$numIter, converged = !fit$convergence)
+    out_tab_z <- rbind(out_tab_z, out)
+    fits_z <- c(fits_z, list(fit))
+}
+
+print(out_tab_z) #looking for: higher log likelihood, lower AIC
+
+for (i in 1:length(fits_z)) {
+  par(mfrow = c(2, 3))
+  resids_z <- MARSSresiduals(fits_z[[i]], type = "tt1")
+  for (j in 1:15) {
+    plot(resids_z$model.residuals[j, ], ylab = "model residuals", 
+        xlab = "")
+    abline(h = 0)
+    title(paste(names(Z_models[i]), ":", rownames(marss_data_z)[j]))
+    }
+}
+```
+
+#### The residual plots are looking better... but they're still essentially the same across all models(??) 
+
+#### According to AICc (and logLik), definitely don't use "all_diff" and can probably also rule out "diff_genet"
+
+### Try z-scored data with different matrices?
+```{r}
+mod_list_z <- list(
+  B = "diagonal and unequal", #identity is another option, but models have lower logLik and higher AICc; random walk diagonal and unequal gives same model output
+  U = "zero", #note: unequal doesn't converge even after 5k iterations
+  Q = "diagonal and equal", #All tanks have same mixing (also, random walk diagonal and unequal is the same AICc and very close Q estimates)
+  Z = "placeholder",
+  A = "zero", #because data have been z-scored
+  R = "diagonal and equal", #observation errors are independent and have equal variances, because there was only ONE sampler (me)
+  C = C_matrix,
+  c = temp_covariate_z)
+
+out_tab_z <- NULL
+fits_z <- list()
+for (i in 1:length(Z_models)) {
+    mod_list_z$Z <- Z_models[[i]]
+    fit <- MARSS(y=marss_data_z, model = mod_list_z, silent = TRUE, 
+        control = list(maxit = 5000))
+    #print(fit)
+    out <- data.frame(H = names(Z_models)[i], logLik = fit$logLik, 
+        AICc = fit$AICc, num.param = fit$num.params, m = length(unique(Z_models[[i]])), 
+        num.iter = fit$numIter, converged = !fit$convergence)
+    out_tab_z <- rbind(out_tab_z, out)
+    fits_z <- c(fits_z, list(fit))
+}
+
+print(out_tab_z) #looking for: higher log likelihood, lower AIC
+
+for (i in 1:length(fits_z)) {
+  par(mfrow = c(2, 3))
+  resids_z <- MARSSresiduals(fits_z[[i]], type = "tt1")
+  for (j in 1:15) {
+    plot(resids_z$model.residuals[j, ], ylab = "model residuals", 
+        xlab = "")
+    abline(h = 0)
+    title(paste(names(Z_models[i]), ":", rownames(marss_data_z)[j]))
+    }
+}
+```
+
+## Visualize z-scored temperatures
+```{r}
+temp_z <- weekly_temp %>%
+  filter(friday < ymd("2024-02-16")) %>%
+  arrange(friday, tank) %>%
+  select(tank, friday, avg_temp) %>%
+  group_by(tank) %>%
+  mutate(avg_temp_z = (avg_temp - mean(avg_temp, na.rm = TRUE)) /sd(avg_temp, na.rm = TRUE),
+         treatment = ifelse(tank < 6, "ambient",
+                            ifelse(tank > 10, "extreme",
+                                   "severe")),
+         tank = as.factor(tank)) %>%
+  ungroup()
+
+ggplot(temp_z, aes(x = friday, y = avg_temp_z, color = tank)) +
+  geom_line() +
+  labs(title = "Z-scored average temperature by tank",
+       x = "Date",
+       y = "Z-scored average temperature") +
+  theme_minimal() +
+  facet_wrap(~treatment)
+```
+
+# Do not run.... 
+
+## Experiment with non 75x1 Z matrix dimensions
+```{r, eval=FALSE}
+#Each treatment different
+Z_matrix2 <- matrix(factor(c(rep(c(1, 0, 0), 25),
+                            rep(c(0, 1, 0), 25),
+                            rep(c(0, 0, 1), 25))),
+                   nrow = 75, byrow = TRUE)
+
+# Combine the blocks into a single 75x3 matrix
+matrix_data <- rbind(matrix(c(rep(1:5, each = 5), rep(0, 25), rep(0, 25)), nrow = 25, ncol = 3, byrow = FALSE),
+                     matrix(c(rep(0, 25), rep(6:10, each = 5), rep(0, 25)), nrow = 25, ncol = 3, byrow = FALSE),
+                     matrix(c(rep(0, 25), rep(0, 25), rep(10:14, each = 5)), nrow = 25, ncol = 3, byrow = FALSE))
+
+C_matrix2 <- matrix(factor(rep(1:15, each = 5)), ncol = 3)
+
+C_matrix2 <- matrix(0, nrow = 75, ncol = 3)
+for (i in 1:3) {
+  C_matrix2[((i-1)*5 + 1):(i*5), i] <- 1
+}
+C_matrix2 <- matrix(factor(C_matrix2), nrow = 75, ncol = 3)
+
+model_list <- list(
+  B = "identity",
+  U = "zero",
+  Q = "diagonal and equal",
+  Z = Z_matrix2,
+  A = A_matrix,
+  R = "diagonal and equal",
+  C = matrix_data,
+  c = temp_covariate)
+
+# non 75x1 Z matrix Does not run 
+#fit1 <- MARSS(y=marss_data, model = model_list,
+#              control = list(maxit = 1000))
+```

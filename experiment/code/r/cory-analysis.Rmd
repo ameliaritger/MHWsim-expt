@@ -5,6 +5,8 @@ date: "2023-11-01"
 output: html_document
 ---
 
+For corAR1 models, might need to change to form = ~ date_num|genet_tank because observations aren't equally spaced across time.
+
 # Load packages 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
@@ -30,6 +32,7 @@ library(cluster) #Gower distance matrix
 library(pairwiseAdonis) #pairwise comparisons with PERMANOVA
 library(ape) #PCOA
 library(AICcPermanova)
+library(emmeans)
 ```
 
 # Run this ONE TIME to load temperature/body size data, then save the file to your local machine
@@ -64,6 +67,9 @@ all_mhw <- all %>%
   filter(date <= end_mhw,
          date >= ymd("2023-10-06"))
 
+floating <- all %>%
+  filter(floating == 1)
+
 #all_sum <- all %>%
   #filter(date == ymd("2023-10-06")) %>%
 #  group_by(date) %>%
@@ -76,12 +82,14 @@ all_sum <- all %>%
   group_by(date) %>%
   #get sum of n_true
   summarize(nTRUE = sum(n_true),
-            n = sum(n))
+            n = sum(n)) %>%
+  ungroup()
 
 all_sum_genet <- all %>%
   filter(date == min(date)) %>%
   group_by(treatment, genet) %>%
-  summarize(n = sum(n))
+  summarize(n = sum(n)) %>%
+  ungroup()
 
 ggplot(all_sum_genet, aes(x = treatment, y = n, group = genet, color=genet)) +
   geom_segment(aes(yend = 0), size = 2, position = position_dodge(width = 0.8)) +
@@ -323,7 +331,8 @@ all_mhw_group <- all_mhw %>%
   mutate(week = floor_date(date, unit = "week")) %>%
   group_by(week, treatment, genet) %>%
   summarize(avg = mean(percent_open),
-            sd = sd(percent_open))
+            sd = sd(percent_open)) %>%
+  ungroup()
 
 ggplot(all_mhw_group, aes(x=week, y=avg)) +
   geom_point(aes(color=genet), size=3) +
@@ -359,7 +368,7 @@ ggplot(all_mhw_group, aes(x=week, y=avg, color=treatment, fill=treatment)) +
   #geom_smooth(method="glm", method.args = list(family = gaussian(link = "log")), se=T) +
   #geom_smooth(method="loess", span=2, se=F) +
   #geom_line(aes(color=treatment)) +
-  facet_wrap(~genet, ncol=3,
+  facet_wrap(~genet, ncol=5,
              labeller =  labeller(genet = c("A" = "Genet A", "B" = "Genet B", "C" = "Genet C", "D" = "Genet D", "E" = "Genet E"))) +
   scale_x_date(date_labels = "%b %d",
                breaks = scales::date_breaks("2 weeks"),
@@ -383,7 +392,7 @@ ggplot(all_mhw_group, aes(x=week, y=avg, color=treatment, fill=treatment)) +
         strip.background = element_rect(fill="white"),
         legend.position = "top")
 
-#ggsave(here("experiment", "figures", "dissertation", "behavior.png"), height=12, width=12)
+ggsave(here("experiment", "figures", "dissertation", "behavior2.png"), height=6, width=12)
 ```
 
 ## Plot total biomass over time
@@ -815,7 +824,8 @@ Once you get to lags(1:36), the addition of the state variable doesn't matter (t
 count_glarma_lag <- all_count %>%
   arrange(date) %>%
   group_by(tank, genet) %>%
-  mutate(lag1 = lag(n_true, 1))
+  mutate(lag1 = lag(n_true, 1)) %>%
+  ungroup()
 
 count_glarma_mhw <- all_count %>%
   filter(mhw == "during")
@@ -1124,16 +1134,131 @@ var_n_true <- var(all_count$n_true, na.rm = TRUE)
 
 overdispersion_by_group <- all_count %>%
   group_by(genet_tank) %>%
-  summarise(
-    mean_n_true = mean(n_true, na.rm = TRUE),
-    var_n_true = var(n_true, na.rm = TRUE)
-  )
+  summarise(mean_n_true = mean(n_true, na.rm = TRUE),
+            var_n_true = var(n_true, na.rm = TRUE)) %>%
+  ungroup()
 
 # Check overdispersion for each group
 overdispersion_by_group %>%
   mutate(overdispersion = ifelse(var_n_true > mean_n_true, "Yes", "No"))
 ```
 The population-wide data is overdispersed, the groups are not. But lme() doesn't support NB or Poisson data. But other GLMM options don't support autocorrelation...so that's something for the discussion section then I guess bc I don't have the time!
+
+
+# TRY THIS with AR(1) structure, like with growth (below)!
+
+## Ah shit, we need to normalize the number of ramets because different starting numbers
+```{r}
+all_count <- all_count %>%
+  group_by(genet) %>%
+  mutate(n_rel = n_true / first(n_true),
+         n_rel_log = log(n_rel)) %>%
+  ungroup()
+
+hist(log(all_count$n_rel))
+```
+
+```{r}
+options <- c("treatment", "genet", "treatment+genet", "treatment*genet", "treatment+day_numeric", "genet+day_numeric", "treatment*day_numeric", "genet*day_numeric", "treatment+genet+day_numeric", "treatment*genet*day_numeric", "treatment*genet+day_numeric", "genet+treatment*day_numeric", "treatment+genet*day_numeric")
+
+# Initialize an empty data frame to store the results
+bic_table3 <- data.frame(model = character(), BIC = numeric(), AIC = numeric(), stringsAsFactors = FALSE)
+
+for (option in options) {
+    formula <- as.formula(paste("log(n_rel) ~", option))
+
+    # Fit the model with the current option and AR(1) correlation
+    model <- tryCatch({
+        lme(formula,
+            random = ~1 | genet_tank,
+            data = all_count,
+            correlation = corAR1(form = ~ 1 | genet_tank))
+    }, error = function(e) {
+        # Print the error if there is one
+        print(paste("Error for option:", option, ":", e$message))
+        return(NULL)
+    })
+
+    # If the model successfully fitted, extract BIC, AIC, and df
+    if (!is.null(model)) {
+        bic_value <- BIC(model)
+        aic_value <- AIC(model)
+        
+        # Add the model name, BIC, AIC, and df to the table
+        bic_table3 <- rbind(bic_table3, data.frame(model = option, BIC = bic_value, AIC = aic_value))
+    } else {
+        # If there's an error, store NA for BIC, AIC, and df
+        bic_table3 <- rbind(bic_table3, data.frame(model = option, BIC = NA, AIC = NA))
+    }
+}
+```
+
+## Post hoc test on "best" model
+```{r}
+model_repro1 <- lme(n_rel_log ~  treatment + day_numeric , random = ~1 | genet_tank, data = all_count, correlation = corAR1(form = ~ 1 | genet_tank))
+
+#model_repro2 <- lme(n_rel_log ~  genet + day_numeric , random = ~1 | genet_tank, data = all_count, correlation = corAR1(form = ~ 1 | genet_tank))
+
+#model_repro3 <- lme(n_rel_log ~  treatment + genet + day_numeric , random = ~1 | genet_tank, data = all_count, correlation = corAR1(form = ~ 1 | genet_tank))
+
+#anova(model_repro1, model_repro3)
+summary(model_repro)
+
+#emm_trends <- emtrends(model_repro, specs = "genet", var = "day_numeric")
+#emm_trends
+emm_genet <- emmeans(model_repro, specs = "treatment")
+emm_genet
+pairs(emm_genet, adjust = "tukey") # Tukey is a common method for pairwise comparisons
+
+model_repro2 <- lme(n_rel_log ~  genet * day_numeric , random = ~1 | genet_tank, data = all_count, correlation = corAR1(form = ~ 1 | genet_tank))
+
+summary(model_repro2)
+emm_trends_repro <- emtrends(model_repro2, specs = "genet", var = "day_numeric")
+emm_trends_repro
+pairs(emm_trends_repro, adjust = "tukey")
+```
+
+
+## Plot it
+```{r}
+preds <- as.data.frame(ggpredict(model_repro, terms = c("day_numeric", "treatment")))
+
+preds <- preds %>%
+  mutate(date = as.Date("2023-10-06") + x) %>%
+  rename("treatment"="group")
+
+ggplot() +
+  #geom_ribbon(data=preds, aes(x = date, ymin = exp(conf.low), ymax = exp(conf.high), fill=treatment), alpha = 0.4) +
+  geom_point(data=all_count, aes(x=date, y=n_rel, color=genet), size=2, alpha=0.6) +
+  #geom_line(data=preds, aes(x = date, y = exp(predicted), color=treatment), size = 1.2) +
+  geom_smooth(data=all_count, aes(x=date, y=n_rel, color=genet), method = "lm", linetype="dashed", se = FALSE, size = 2) +
+  facet_wrap(~treatment,
+             labeller =  labeller(treatment = c("cold" = "Ambient", "severe" = "Severe MHW", "extreme" = "Extreme MHW"))) +
+  scale_x_date(date_labels = "%b %d",
+               breaks = scales::date_breaks("2 weeks"),
+               limits = c(min(all_count$date), max = max(all_count$date))) +
+  scale_fill_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45", "cold" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00"),
+                    breaks = c("cold", "severe", "extreme"),
+                    labels = c("cold" = "Ambient", "severe" = "Severe", "extreme" = "Extreme")) +
+  scale_color_manual(values = c("A" = "#9370DB", "B" = "#C21B78", "C" = "#FF9933", "D" ="#FF3333", "E" = "#662B45", "cold" = "#0072B2", "severe" = "#E69F00", "extreme" = "#D55E00"),
+                     breaks = c("A", "B", "C", "D", "E")) +
+  labs(x = "",
+       y = "Number of ramets (Standardized)",
+       color = "Genet",
+       fill = "Treatment") +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=22),
+        axis.text.y=element_text(size=22),
+        axis.title.x=element_blank(),
+        axis.title.y=element_text(size=24),
+        legend.text=element_text(size=18),
+        legend.title=element_text(size=22),
+        strip.text = element_text(size = 24),
+        strip.background = element_rect(fill="white"),
+        legend.position = "top")
+
+ggsave(here("experiment", "figures", "dissertation", "standardized_polyps2.png"), height=8, width=12)
+```
 
 
 # Growth data
@@ -1165,9 +1290,9 @@ hist(all_growth$avg_size_log,
 Definitely log transform avg size
 
 ```{r}
-options <- c("treatment", "genet", "treatment+genet", "treatment*genet")
-p_values <- c(0, 1, 2, 3)  # Values for p
-q_values <- c(0, 1, 2)  # Values for q
+options <- c("treatment", "genet", "treatment+genet", "treatment*genet", "treatment+day_numeric", "genet+day_numeric", "treatment+genet+day_numeric", "treatment*genet*day_numeric", "treatment*genet+day_numeric")
+p_values <- 0:3  # Values for p
+q_values <- 0:2  # Values for q
 
 # Initialize an empty data frame to store the results
 bic_table <- data.frame(model = character(), p = integer(), q = integer(), BIC = numeric(), AIC = numeric(), stringsAsFactors = FALSE)
@@ -1178,7 +1303,7 @@ for (option in options) {
     for (q in q_values) {
       # Create the formula dynamically using as.formula for the fixed effects (option)
       formula <- as.formula(paste("avg_size_log ~", option))
-      
+
       # Fit the model with the current option and fixed p, q for ARMA
       model <- tryCatch({
         lme(formula,
@@ -1190,15 +1315,17 @@ for (option in options) {
         print(paste("Error for option:", option, "p:", p, "q:", q, ":", e$message))
         return(NULL)
       })
-      
-      # If the model successfully fitted, extract BIC
+
+      # If the model successfully fitted, extract BIC, AIC, and df
       if (!is.null(model)) {
         bic_value <- BIC(model)
         aic_value <- AIC(model)
-        # Add the model name, p, q, and BIC to the table
+        #df_value <- model$df # Extract degrees of freedom
+
+        # Add the model name, p, q, BIC, AIC, and df to the table
         bic_table <- rbind(bic_table, data.frame(model = option, p = p, q = q, BIC = bic_value, AIC = aic_value))
       } else {
-        # If there's an error, store NA for BIC
+        # If there's an error, store NA for BIC, AIC, and df
         bic_table <- rbind(bic_table, data.frame(model = option, p = p, q = q, BIC = NA, AIC = NA))
       }
     }
@@ -1207,6 +1334,61 @@ for (option in options) {
 ```
 
 p=3, q=1 are top 2 best models. Treatment only is slightly better than Genet only. 
+
+# For loop through all fixed effect options
+```{r}
+options <- c("treatment", "genet", "treatment+genet", "treatment*genet", "treatment+day_numeric", "genet+day_numeric", "treatment*day_numeric", "genet*day_numeric", "treatment+genet+day_numeric", "treatment*genet*day_numeric", "treatment*genet+day_numeric", "genet+treatment*day_numeric", "treatment+genet*day_numeric")
+
+# Initialize an empty data frame to store the results
+bic_table2 <- data.frame(model = character(), BIC = numeric(), AIC = numeric(), stringsAsFactors = FALSE)
+
+for (option in options) {
+    formula <- as.formula(paste("avg_size_log ~", option))
+
+    # Fit the model with the current option and AR(1) correlation
+    model <- tryCatch({
+        lme(formula,
+            random = ~1 | genet_tank,
+            data = all_growth,
+            correlation = corAR1(form = ~ 1 | genet_tank))
+    }, error = function(e) {
+        # Print the error if there is one
+        print(paste("Error for option:", option, ":", e$message))
+        return(NULL)
+    })
+
+    # If the model successfully fitted, extract BIC, AIC, and df
+    if (!is.null(model)) {
+        bic_value <- BIC(model)
+        aic_value <- AIC(model)
+        
+        # Add the model name, BIC, AIC, and df to the table
+        bic_table2 <- rbind(bic_table2, data.frame(model = option, BIC = bic_value, AIC = aic_value))
+    } else {
+        # If there's an error, store NA for BIC, AIC, and df
+        bic_table2 <- rbind(bic_table2, data.frame(model = option, BIC = NA, AIC = NA))
+    }
+}
+```
+
+
+## Let's do post-hoc tests on genet+day_numeric
+```{r}
+model_growth <- lme(avg_size_log ~  genet + day_numeric , random = ~1 | genet_tank, data = all_growth, correlation = corAR1(form = ~ 1 | genet_tank))
+summary(model_growth)
+
+model_growth2 <- lme(avg_size_log ~  treatment+genet + day_numeric , random = ~1 | genet_tank, data = all_growth, correlation = corAR1(form = ~ 1 | genet_tank))
+summary(model_growth)
+
+#anova(model_growth, model_growth2)
+
+emm_trends <- emtrends(model_growth, specs = "genet", var = "day_numeric")
+emm_trends
+emm_genet <- emmeans(model_growth, specs = "genet")
+emm_genet
+pairs(emm_genet, adjust = "tukey") # Tukey is a common method for pairwise comparisons
+```
+
 
 # Behavior data
 
@@ -1244,7 +1426,8 @@ overdispersion_by_group <- all_behavior %>%
   summarise(
     mean_n_true = mean(percent_open, na.rm = TRUE),
     var_n_true = var(percent_open, na.rm = TRUE)
-  )
+  ) %>%
+  ungroup()
 
 ggplot(all_behavior, aes(x = date, y = percent_open, group=genet_tank, color=genet_tank)) +
   geom_line() +
@@ -1282,8 +1465,9 @@ overdispersion_by_group <- all_behavior %>%
   summarise(
     mean_n_true = mean(percent_fully_open, na.rm = TRUE),
     var_n_true = var(percent_fully_open, na.rm = TRUE)
-  ) #my data are definitely not overdispersed so that's good
-
+  ) %>% #my data are definitely not overdispersed so that's good
+  ungroup()
+  
 model_simple <- lmer(percent_fully_open ~ treatment * genet * day_numeric + (1 | genet_tank), data = all_behavior)
 summary(model_simple)
 
@@ -1427,7 +1611,15 @@ model_beta4 <- glmmTMB(
   weights = n
 )
 
-BIC_check <- BIC(model_beta1, model_beta2, model_beta3, model_beta4)
+model_beta5 <- glmmTMB(
+  percentmin ~ treatment * genet * day_numeric + (1 | tank) + (1 | tank:genet) + ar1(day_factor + 0|tank+genet),
+  data = all_behavior,
+  family = beta_family(),
+  weights = n
+)
+
+anova(model_beta5, model_beta1)
+BIC_check <- BIC(model_beta1, model_beta2, model_beta3, model_beta4, model_beta5)
 ```
 
 
@@ -1514,7 +1706,7 @@ model_4 <- glmmTMB(
   weights = n
 )
 
-BIC_compare <- BIC(model_0, model_1, model_2, model_3, model_4)
+BIC_compare <- BIC(model_2, model_3, model_4)
 
 summary(model_4)
 ```
@@ -1627,6 +1819,20 @@ pairwise_mhw_treatment_genet <- pairwise.adonis(distance_matrix, factors = all_p
 print(pairwise_mhw_treatment_genet)
 ```
 
+## "Calculate" the BIC
+```{r}
+model <- permanova_mhw_treatment_genet
+rss <- model$aov.tab["Residuals", "SumsOfSqs"]
+n <- nrow(all_permanova)
+k <- nrow(model$aov.tab) - 1
+bic <- n * log(rss / n) + k * log(n)
+```
+
+```{r}
+bic_permanova_mhw_treatment_genet_day <- bic
+```
+
+
 # Hmm that has very similar (48%) residual variation as genet only. Let's try a combo treatment_mhw * genet model? 
 ```{r}
 permanova_mhw_treatment_genet2 <- adonis(distance_matrix ~ mhw_treatment * genet,
@@ -1662,7 +1868,7 @@ permanova_mhw_treatment_genet_day$aov.tab
 #permanova_mhw_treatment_genet_nonlinear_day$aov.tab # This removes less than 1% from the residual R2... not worth it
 ```
 
-# Let's visualize distance matrix with ordination plot
+## Let's visualize distance matrix with ordination plot
 ```{r}
 response_matrix <- all_permanova[, c("percent_open", "n_true", "avg_size_log")]
 distance_matrix <- daisy(response_matrix, metric = "gower")
@@ -1680,7 +1886,7 @@ percent_explained_axis1 <- round((eigenvalues[1] / sum(eigenvalues)) * 100, 1)
 percent_explained_axis2 <- round((eigenvalues[2] / sum(eigenvalues)) * 100, 1)
 ```
 
-# Plot the PCOAs
+## Plot the PCOAs
 ```{r}
 ggplot(plot_data, aes(x = PCoA1, y = PCoA2, color = mhw)) +
   geom_point(size = 3) +
@@ -1729,7 +1935,7 @@ ggplot(plot_data, aes(x = PCoA1, y = PCoA2, color = mhw_treatment)) +
 ```
 
 Measured variables (especially population growth and body size) are strongly autocorrelated which is no-bueno for PERMANOVA so let's super simplify the data.
-6 time points: start/mid/end of MHW, start/mid/end of recovery
+# PERMANOVA on 6 time points: start/mid/end of MHW, start/mid/end of recovery
 ```{r}
 all_simple <- all %>%
   filter(date >= ymd("2023-10-06"), #remove 10-06 to make # days between mhw/recovery equivalent
@@ -1784,6 +1990,11 @@ permanova_genet <- adonis(distance_matrix ~ genet,
                                   permutations = 999)
 permanova_genet$aov.tab #R2 = 0.74
 
+permanova_mhw_genet2 <- adonis(distance_matrix ~ mhw_week+genet,
+                                  data = all_simple,
+                                  permutations = 999)
+permanova_mhw_genet2$aov.tab #R2 = 0.74
+
 permanova_mhw_genet <- adonis(distance_matrix ~ mhw_week*genet,
                                   data = all_simple,
                                   permutations = 999)
@@ -1794,10 +2005,15 @@ permanova_mhw_treatment <- adonis(distance_matrix ~ mhw_week*treatment,
                                   permutations = 999)
 permanova_mhw_treatment$aov.tab #R2 = 0.54
 
+permanova_mhw_treatment2 <- adonis(distance_matrix ~ mhw_week+treatment,
+                                  data = all_simple,
+                                  permutations = 999)
+
 permanova_mhw_treatment_genet <- adonis(distance_matrix ~ mhw_week*treatment*genet,
                                   data = all_simple,
                                   permutations = 999)
 permanova_mhw_treatment_genet$aov.tab #R2 = 0.22
+#model1
 
 permanova_mhw_treatment_genet2 <- adonis(distance_matrix ~ mhw_week+treatment+genet,
                                   data = all_simple,
@@ -1813,6 +2029,7 @@ permanova_mhw_treatment_genet4 <- adonis(distance_matrix ~ mhw_week+treatment*ge
                                   data = all_simple,
                                   permutations = 999)
 permanova_mhw_treatment_genet4$aov.tab #R2 = 0.26
+#model2
 
 permanova_mhw_treatment_genet5 <- adonis(distance_matrix ~ mhw_week*genet+treatment,
                                   data = all_simple,
@@ -1823,7 +2040,18 @@ permanova_mhw_treatment_genet5$aov.tab #R2 = 0.26
 #print(pairwise_mhw_treatment_genet)
 ```
 
-# Calculate adjusted R-squared to compare models
+## "Calculate" the BIC
+```{r}
+model <- permanova_mhw_treatment_genet
+rss <- model$aov.tab["Residuals", "SumsOfSqs"]
+n <- nrow(all_simple)
+k <- model$aov.tab["Total", "Df"]-model$aov.tab["Residuals", "Df"]
+bic <- n * log(rss / n) + k * log(n)
+
+bic_permanova_mhw_treatment_genet_day <- bic
+```
+
+## Function to calculate adjusted R-squared to compare models
 ```{r}
 calculate_adjusted_r_squared <- function(adonis_model) {
   n_observations <- 450 # Setting n_observations directly to 450
@@ -1838,8 +2066,11 @@ calculate_adjusted_r_squared <- function(adonis_model) {
 
 ## Calculate adjusted R2
 ```{r}
-calculate_adjusted_r_squared(permanova_mhw_treatment_genet)
+calculate_adjusted_r_squared(permanova_mhw_treatment_genet5)
 permanova_mhw_treatment_genet$aov.tab
+
+calculate_adjusted_r_squared(permanova_mhw_treatment_genet2)
+permanova_mhw_treatment_genet2$aov.tab
 
 calculate_adjusted_r_squared(permanova_mhw_treatment_genet4)
 permanova_mhw_treatment_genet4$aov.tab
@@ -1847,9 +2078,9 @@ permanova_mhw_treatment_genet4$aov.tab
 #model0 <- adonis2(distance_matrix ~ mhw_week*genet,
 #                                  data = all_simple,
 #                                  permutations = 999)
-#model1 <- adonis2(distance_matrix ~ mhw_week*treatment*genet,
-#                                  data = all_simple,
-#                                  permutations = 999)
+model1 <- adonis2(distance_matrix ~ mhw_week+treatment+genet,
+                                  data = all_simple,
+                                  permutations = 999)
 model2 <- adonis2(distance_matrix ~ mhw_week+treatment*genet,
                                   data = all_simple,
                                   permutations = 999)
@@ -1952,12 +2183,242 @@ AIC1 <- AICc.PERMANOVA2(model1)
 AIC2 <- AICc.PERMANOVA2(model2)
 ```
 
+## Let's try not cheating, and calculate the BIC as Chris requested
+
+## adonis()
+```{r}
+# Step 1: Put all your models in a named list
+models <- list(
+  mhw = permanova_mhw,
+  treatment = permanova_treatment,
+  genet = permanova_genet,
+  mhw_genet = permanova_mhw_genet,
+  mhw_genet2 = permanova_mhw_genet2,
+  mhw_treatment = permanova_mhw_treatment,
+  mhw_treatment2 = permanova_mhw_treatment2,
+  mhw_treatment_genet = permanova_mhw_treatment_genet,
+  mhw_treatment_genet2 = permanova_mhw_treatment_genet2,
+  mhw_treatment_genet3 = permanova_mhw_treatment_genet3,
+  mhw_treatment_genet4 = permanova_mhw_treatment_genet4,
+  mhw_treatment_genet5 = permanova_mhw_treatment_genet5
+)
+
+# Step 2: Set number of observations
+n <- nrow(all_simple)
+
+# Step 3: Loop through models and compute BIC
+bic_table <- data.frame(
+  model = character(),
+  rss = numeric(),
+  k = numeric(),
+  bic = numeric(),
+  r_squared = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (model_name in names(models)) {
+  model <- models[[model_name]]
+  print(model_name)
+  
+  rss <- model$aov.tab["Residuals", "SumsOfSqs"]
+  k <- model$aov.tab["Total", "Df"]-model$aov.tab["Residuals", "Df"]
+  bic <- n * log(rss / n) + k * log(n)
+  r_squared <- sum(model$aov.tab[1:k, "R2"])  # same as 1 - Residual R2
+  
+  bic_table <- rbind(bic_table, data.frame(
+    model = model_name,
+    rss = rss,
+    k = k,
+    bic = bic,
+    r_squared = r_squared
+  ))
+}
+
+# Step 4: View or sort by BIC
+print(bic_table)
+```
+
+## adonis2()
+```{r}
+permanova_mhw <- adonis2(distance_matrix ~ mhw_week,
+                        data = all_simple,
+                        permutations = 999, by=NULL)
+
+permanova_treatment <- adonis2(distance_matrix ~ treatment,
+                               data = all_simple,
+                               permutations = 999, by=NULL)
+
+permanova_genet <- adonis2(distance_matrix ~ genet,
+                           data = all_simple,
+                           permutations = 999, by=NULL)
+
+permanova_mhw_genet <- adonis2(distance_matrix ~ mhw_week*genet,
+                               data = all_simple,
+                               permutations = 999, by=NULL)
+
+permanova_mhw_treatment <- adonis2(distance_matrix ~ mhw_week*treatment,
+                                  data = all_simple,
+                                  permutations = 999, by=NULL)
+
+permanova_mhw_treatment_genet <- adonis2(distance_matrix ~ mhw_week*treatment*genet,
+                                  data = all_simple,
+                                  permutations = 999, by=NULL)
+
+permanova_mhw_treatment_genet2 <- adonis2(distance_matrix ~ mhw_week+treatment+genet,
+                                  data = all_simple,
+                                  permutations = 999, by=NULL)
+
+permanova_mhw_treatment_genet3 <- adonis2(distance_matrix ~ mhw_week*treatment+genet,
+                                  data = all_simple,
+                                  permutations = 999, by=NULL)
+
+permanova_mhw_treatment_genet4 <- adonis2(distance_matrix ~ mhw_week+treatment*genet,
+                                  data = all_simple,
+                                  permutations = 999, by=NULL)
+
+permanova_mhw_treatment_genet5 <- adonis2(distance_matrix ~ mhw_week*genet+treatment,
+                                  data = all_simple,
+                                  permutations = 999, by=NULL)
+
+# Step 1: Put all your adonis2() models in a named list
+models <- list(
+  mhw = permanova_mhw,
+  treatment = permanova_treatment,
+  genet = permanova_genet,
+  mhw_genet = permanova_mhw_genet,
+  mhw_treatment = permanova_mhw_treatment,
+  mhw_treatment_genet = permanova_mhw_treatment_genet,
+  mhw_treatment_genet2 = permanova_mhw_treatment_genet2,
+  mhw_treatment_genet3 = permanova_mhw_treatment_genet3,
+  mhw_treatment_genet4 = permanova_mhw_treatment_genet4,
+  mhw_treatment_genet5 = permanova_mhw_treatment_genet5
+)
+
+# Step 3: Loop through models and compute BIC
+bic_table2 <- data.frame(
+  model = character(),
+  rss = numeric(),
+  k = numeric(),
+  bic = numeric(),
+  r_squared = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (model_name in names(models)) {
+  model <- models[[model_name]]
+  print(model_name)
+  
+  # Only for adonis2() models (since we're assuming they have 'SumOfSqs')
+  rss <- model$SumOfSqs[2]
+  n <- sum(model$Df[3])  # or extract from model$Df["Total"]
+  k <- model$Df[1]
+  r_squared <- sum(model$SumOfSqs[1:k]) / sum(model$SumOfSqs)
+  
+  # Calculate BIC
+  bic <- n * log(rss / n) + k * log(n)
+  
+  # Add the results to the bic_table
+  bic_table2 <- rbind(bic_table2, data.frame(
+    model = model_name,
+    rss = rss,
+    k = k,
+    bic = bic,
+    r_squared = r_squared
+  ))
+}
+
+# Step 4: View or sort by BIC
+print(bic_table2)
+
+```
+
+
+## Calculate BIC from adonis2()
+```{r}
+model <- model2
+
+rss <- model$SumOfSqs[2]
+n <- sum(model$Df[3])  # or extract from model$Df["Total"]
+k <- model$Df[1]
+
+bic_model2 <- n * log(rss / n) + k * log(n)
+
+```
+
+## Let's visualize our distance matrix
+
+### PCoA
+```{r}
+# Principal Coordinates Analysis (PCoA)
+pcoa_result <- cmdscale(distance_matrix, eig = TRUE, k = 2)
+
+# Merge scores with metadata
+pcoa_df <- data.frame(
+  PC1 = pcoa_result$points[, 1],
+  PC2 = pcoa_result$points[, 2],
+  all_simple
+) %>%
+  mutate(mhw_week = factor(mhw_week, levels = c("during.0", "during.5", "during.9", "after.0", "after.4", "after.8"),
+                           labels = c("During (Week 0)", "During (Week 5)", "During (Week 9)", "After (Week 0)", "After (Week 4)", "After (Week 8)")))
+
+centroids <- pcoa_df %>%
+  group_by(treatment, mhw_week) %>%
+  summarise(
+    centroid_PC1 = mean(PC1),
+    centroid_PC2 = mean(PC2),
+    .groups = "drop"
+  )
+library(viridis)
+ggplot(pcoa_df, aes(x = PC1, y = PC2, color = mhw_week, shape = mhw_week)) +
+  stat_ellipse(aes(fill = mhw_week,color=mhw_week), geom = "polygon", alpha = 0.2) +
+  geom_point(size = 3, alpha=0.6) +
+  scale_fill_grey(start = 0.6, end = 0.1) +
+  scale_color_grey(start = 0.6, end = 0.1) +
+  scale_x_continuous(breaks = c(-0.6, -0.3, 0, 0.3)) +
+  #                   breaks =) +
+  #scale_fill_manual(values = rev(c("#0072B2","#2F77A2", "#5D7C92", "#8C817F", "#BA866F", "#D55E00"))) +
+  #scale_color_manual(values = rev(c("#0072B2","#2F77A2", "#5D7C92", "#8C817F", "#BA866F", "#D55E00"))) +
+#"#003366","#00558F","#0072B2","#4D9DCB", "#9DC6E2","#D0E6F5")) +
+  #geom_point(data = centroids, aes(x = centroid_PC1, y = centroid_PC2), shape = 4, size = 4, stroke = 1.5) +  # shape 4 = X
+  #geom_path(data = centroids, aes(x = centroid_PC1, y = centroid_PC2, group = treatment),color = "black", linewidth = 0.8, arrow = arrow(length = unit(0.2, "cm"))) +
+    labs(title = "",
+       x = "PCoA 1",
+       y = "PCoA 2",
+       color= "Time period",
+       shape="Time period") +
+  guides(fill=FALSE) +
+  facet_wrap(~treatment, labeller = labeller(treatment = c(cold = "Ambient", severe = "Severe", extreme = "Extreme"))) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        text = element_text(size = 20),
+        strip.background = element_rect(fill = "white", color = "black"))
+
+#ggsave(here("experiment", "figures", "dissertation","permanova.png"), width=12, height=7)
+```
+
+### NMDS 
+```{r}
+nmds_result <- metaMDS(distance_matrix, distance = "gower", k = 2, trymax = 100)
+
+# Extract NMDS scores
+nmds_df <- as.data.frame(scores(nmds_result))
+nmds_df <- cbind(nmds_df, all_simple)
+nmds_df$group <- interaction(nmds_df$treatment, nmds_df$genet)
+
+# Plot NMDS
+ggplot(nmds_df, aes(x = NMDS1, y = NMDS2, color = mhw_week)) +
+  geom_point(size = 3) +
+  stat_ellipse() +
+  labs(title = "NMDS of Gower Distance") +
+  theme_minimal()
+```
+
 ## Let's run some post-hoc on our "final" model
 
 ### pairwise comparisons
 ```{r}
 library(pairwiseAdonis)
-model_final <- adonis2(distance_matrix ~ mhw_week+treatment*genet,
+model_final <- adonis2(distance_matrix ~ mhw_week+treatment+genet,
                        data = all_simple,
                        permutations = 999)
 
@@ -1982,6 +2443,10 @@ within_treatment_comparisons <- pairwise_results %>%
 ### ANOSIM
 ```{r}
 anosim_response <- anosim(distance_matrix, grouping = all_simple$treatment_genet, permutations = 999)
+#anosim_result <- anosim(distance_matrix, grouping = all_simple$treatment, permutations = 999)
+#anosim_result <- anosim(distance_matrix, grouping = all_simple$genet, permutations = 999)
+#anosim_result <- anosim(distance_matrix, grouping = all_simple$mhw_week, permutations = 999)
+
 print(anosim_response)
 summary(anosim_response)
 ```
@@ -2027,6 +2492,7 @@ all_count_plot <- all_count %>%
             ci = qt(0.95, length(n_true)-1)*se,
             lower = mean - ci,
             upper = mean + ci) %>%
+  ungroup() %>%
   dplyr::select(date, treatment, genet, mean, sd, lower, upper)
 
 
@@ -2070,13 +2536,15 @@ all_count_dispersion <- all_count %>%
   group_by(genet_tank) %>%
   summarize(mean = mean(n_true),
             var = var(n_true),
-            ratio = var/mean)
+            ratio = var/mean) %>%
+  ungroup()
 
 all_count_dispersion_genet <- all_count %>%
   group_by(genet) %>%
   summarize(mean = mean(n_true),
             var = var(n_true),
-            ratio = var/mean)
+            ratio = var/mean) %>%
+  ungroup()
 ```
 Actually, if the data is organized by individual groupings (genet_tank OR genet only) it's not actually that overdispersed. Some of them are actually underdispersed. Let's keep this in mind for model interpretation. 
 
@@ -2092,6 +2560,7 @@ all_count_treatment <- all_count %>%
             ci = qt(0.95, length(n_true)-1)*se,
             lower = mean - ci,
             upper = mean + ci) %>%
+  ungroup() %>%
   dplyr::select(date, treatment, mean, sd, lower, upper)
 
 image <- ggplot(all_count_treatment, aes(x=date,color=treatment)) +
