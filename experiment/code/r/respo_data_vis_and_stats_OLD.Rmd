@@ -1,0 +1,480 @@
+---
+title: "Data visualization, statistics, and supplementary tables"
+author: "Amelia Ritger and Krista Kraskura"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(here)
+library(lme4)
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(merTools)
+library(ggeffects)
+theme_set(theme_bw()) # set the default ggplot 
+
+
+```
+
+```{r data}
+# data files from metabolism analysis
+list_csv_files <- paste(here("MMR_SMR_AS_EPOC", "csv_analyzed_MR/"),
+                        list.files(path = here("MMR_SMR_AS_EPOC",
+                                               "csv_analyzed_MR")),
+                        sep ="")
+
+# *************************************************
+# compile all data in one dataframe
+data.mr <- do.call(rbind, lapply(list_csv_files, function(x) read.csv(x, stringsAsFactors = FALSE)))
+
+# rename and organise 
+data.mr <- data.mr %>% 
+  dplyr:::select(filename, ID, Ch, BW, t_mean, N_mo2, smr_mean10minVal) %>% 
+  rename("temp_test" = t_mean,
+         "MR" = smr_mean10minVal) %>% 
+  mutate(file_id = paste(gsub("_cory.*", "", gsub("^.{25}", "", filename)), 
+                         "_", ID, sep = ""),
+         MR = MR*BW)# not mass specfic, mg)2/min
+
+# exclude:
+# 2023-12-08_115055_120823_15C_nononoB2A3B3_cory_A_converted_slopes (no robust background)
+# 2023-12-10_144051_121023_15C_E1E2E4E3E4E5 day (no robust bakcground, anomoly)
+
+data.mr<-data.mr[!c(grepl(x = data.mr$filename, pattern = "2023-12-08_115055_120823") | 
+                    grepl(x = data.mr$filename, pattern = "2023-12-10")),]
+# *************************************************
+# data files from metabolism analysis
+list_csv_files <- paste(here("MMR_SMR_AS_EPOC", "csv_analyzed_SMR/"),
+                        list.files(path = here("MMR_SMR_AS_EPOC",
+                                               "csv_analyzed_SMR")),
+                        sep ="")
+# compile all data in one dataframe and add filename
+data.rmr <- do.call(rbind, lapply(list_csv_files, function(x) cbind(read.csv(x), filename=gsub("^.{114}", "", x))))
+# exclude the same days
+data.rmr<-data.rmr[!c(grepl(x = data.rmr$filename, pattern = "2023-12-08_115055_120823") | 
+                    grepl(x = data.rmr$filename, pattern = "2023-12-10_144051_121023")),]
+
+# view(data.mr)
+# VOLUMES: 
+# With tile, probe, and stir bar: 88 mL
+# Without tile (but with probe and stir bar): 93 mL 
+
+# rename and organise 
+data.high.back<-data.rmr %>% 
+  dplyr:::select(ID, Ch, bw, t_mean, mo2,
+                 m, min_start, r2, 
+                 background_slope, filename) %>% 
+  rename(BW = bw) %>% 
+  mutate(mr_back = abs(background_slope * 0.088), 
+         mr_cory = abs(m * 0.088-BW), 
+         back_pct = mr_back/mr_cory,
+         file_id = paste(gsub("_cory.*", "", gsub("^.{23}", "", filename)), 
+                         "_", ID, sep = "")) %>% # volume with tile in ML
+  filter(back_pct > 0.8) %>% 
+  group_by(file_id) %>% 
+  mutate(MR = mean(mo2)*BW,
+         min_mo2_mgO2min = min(mo2)*BW,
+         max_mo2_mgO2min = max(mo2)*BW,
+         n = n())
+  
+# unique(data.rmr$file_id)
+# *************************************************
+# master datafile with respirometry trial details
+data<-readxl::read_excel(path = here("data/respirometry_info.xlsx"),
+                                 sheet = "merged data")
+
+data<- data %>% 
+  tidyr::fill(Filename) %>% # fill blanks
+  filter(Run == "Corynactis") %>% # exclude empty chamber runs
+  mutate(ID = paste(Box, "-", Genet, Tank, "-P", Polyps, sep = "")) %>%  # unique ID same as respo ID 
+  rename(sum_mass_g = `Sum body size (g)`) %>% 
+  mutate_at(c("Filename", "Alternative filename", "Box", 
+              "Genet", "Run"), as.factor) %>% 
+  mutate_at(c("Temperature", "Polyps", "sum_mass_g", "Tank"), as.numeric) %>% 
+  mutate(Timepoint = if_else(Date < as.POSIXct("2023-12-10"), "MHW", "recovery"),
+         Treatment = if_else(Tank <= 5, "ambient", 
+                              if_else(Tank >= 11, "extreme MHW", "severe MHW")),
+         file_id = paste(gsub("_cory.*", "", gsub("^.{25}", "", Filename)), 
+                         "_", ID, sep = "")) %>%  # add treatments and ID to merge
+  mutate_at(c("Tank"), as.factor) 
+
+data %>% 
+  dplyr::group_by(Genet) %>% 
+  reframe(Date = unique(Date)) %>%
+  mutate(Timepoint = if_else(Date < as.POSIXct("2024-02-01"), "MHW", "recovery")) %>% 
+  write.csv("sampling_date_data.csv")
+# length(levels(factor(data$file_id)))
+# length(levels(factor(data.mr$file_id)))
+# view(data)
+# levels(factor(data$ID)) == levels(factor(data.mr$ID))
+# data0<-merge(data, data.mr, by = "file_id")
+data0<-merge(data, data.mr, by = "file_id")
+# data0$file_id
+
+`%nin%` <- negate(`%in%`)
+data0<-data0 %>% 
+  filter(file_id %nin% unique(data.rmr$file_id))
+# sanity checks
+# round(as.numeric(data0$sum_mass_g),3) == round(as.numeric(data0$BW*1000), 3)
+# data0$ID.x == data0$ID.y
+
+# view(data0)
+# 
+
+```
+
+```{r color palettes}
+# genets
+genet_cols<- c("A" = "#9370DB", "B" = "#C21B78",
+               "C" = "#FF9933", "D" ="#FF3333",
+               "E" = "#662B45")
+# treatments
+treatm_cols<- c("cold" = "#0072B2",
+                "severe" = "#E69F00",
+                "extreme" = "#D55E00")
+
+```
+
+Models and model comparisons
+```{r stats models, echo = TRUE}
+# mixed 
+m0<-lm(log(MR) ~ 1, data = data0)
+m1<-lmer(log(MR) ~ log(BW) + Timepoint + Treatment + (1|Tank) , data = data0) # singular 
+m2<-lmer(log(MR) ~ log(BW) + Timepoint + Genet + (1|Tank) , data = data0)
+m3<-lmer(log(MR) ~ log(BW) + Timepoint + Genet + Treatment + (1|Tank) , data = data0) # <<< directly testing hypothesis
+m4<-lmer(log(MR) ~ log(BW) + Timepoint + Genet + Treatment + (1|Tank) , data = data0) # <<< directly testing hypothesis
+
+# m4<-lmer(log(MR) ~ log(BW) + Genet * Treatment + (1|Tank) + (1|Polyps), data = data0) # singular convergence fit
+# m<-lmer(log(MR) ~ log(BW) + Treatment + (1|Genet) + (1|Tank) + (1|Polyps), data = data0)
+
+m0.n<-lmer(log(MR) ~  1 + (1|Genet) + (1|Tank) , data = data0)
+m1.n<-lmer(log(MR) ~ Timepoint + Treatment + (1|Tank) , data = data0)
+m2.n<-lmer(log(MR) ~ Timepoint + Genet + (1|Tank) , data = data0)
+m3.n<-lmer(log(MR) ~ Timepoint + Genet + Treatment + (1|Tank) , data = data0)
+
+# m4.n<-lmer(log(MR) ~ Genet * Treatment + (1|Tank) + (1|Polyps), data = data0)#  singular convergence fit
+
+```
+
+```{r stats mod comparison}
+kableExtra::kable(BIC(m0, m1, m2, m3, m0.n, m1.n, m2.n, m3.n))
+best.model<-m3
+# kableExtra::kable(AIC(m0, m1, m2, m3, m0.n, m1.n, m2.n, m3.n))
+```
+
+Best model outputs: 
+```{r stats output}
+summary(best.model)
+# scaling exponent: 0.5745
+car::Anova(best.model, type = "II")
+
+emmeans_grid<-emmeans::emmeans(best.model,type = "response", specs = c("Timepoint", "Treatment", "Genet"))
+
+# setup data frame with normalized body size
+data<-data0 %>% 
+  mutate(fit.m = predict(best.model, re.form = NA), # marginal fixed effectcs 
+         fit.c = predict(best.model, re.form = NULL),
+         resid = resid(best.model)) # conditional fixed effects
+
+
+```
+
+Normally distributed residuals
+```{r residuals, fig.align='center', fig.width=8, fig.height=2.5, include = FALSE}
+
+p1<-ggplot(data = data, aes(y = resid,
+                  color = Genet,
+                  fill = Genet, 
+                  group = Genet)) +
+  geom_density(alpha = 0.6)  +
+  scale_color_manual(values = genet_cols)+
+  scale_fill_manual(values = genet_cols)+
+  facet_grid(.~Treatment)
+p1
+# p2<-(m3)
+
+```
+
+```{r gredicted data for mean size}
+# predictions of individual MR 
+data_pred<-data0 %>% 
+  mutate(BW = mean(BW))
+data_pred$predMR<-predict(best.model, newdata = data_pred)
+
+# predicrtions for avg body size, means of treatment
+emmeans_grid<-as.data.frame(emmeans_grid)
+
+```
+
+
+
+```{r unit conversions}
+# https://www.ices.dk/data/tools/Pages/Unit-conversions.aspx
+# Molar volume at STP = 22.391 l
+# Molar weight of oxygen = 31.998 g
+# Atomic Mass of oxygen = 15.994 g/mol
+# 1 µmol O2= 0.022391 ml
+# 1 ml/l = 10​00/22.391 = 44.661 µmol/l
+# 1 mg/l = 22.391 ml/31.998 = 0.700 ml/l
+# 1 mg-at/l = 15.994x22.391/31.998 = 11.192 ml
+# 0.001 ml O2 x 44.64µmol/ml
+# 
+# currently mgO2/min/kg 
+emmeans_grid$response_ml_g_h<-emmeans_grid$response*0.7*60*1000
+emmeans_grid$lower.CL_ml_g_h<-emmeans_grid$lower.CL*0.7*60*1000
+emmeans_grid$upper.CL_ml_g_h<-emmeans_grid$upper.CL*0.7*60*1000
+data_pred$MR_ml_g_h<-data_pred$MR*0.7*60*1000
+
+data_means_A_B_E<- data0 %>% 
+  filter(Genet == "A" | Genet == "B" | Genet == "E") %>% 
+  mutate(Treatment = factor(Treatment, levels = c("ambient", "severe MHW", "extreme MHW")),
+         Genet = factor(Genet, levels = c("A", "B", "E", "C", "D"))) %>%
+  group_by(Treatment, Genet, Timepoint) %>% 
+  reframe(mean_MR = mean(MR*0.7*60*1000), 
+          MR_mgO2L = mean(MR),
+          sd_MR = sd(MR*0.7*60*1000),
+          n = n())
+
+data_means<- data0 %>% 
+  mutate(Treatment = factor(Treatment, levels = c("ambient", "severe MHW", "extreme MHW")),
+         Genet = factor(Genet, levels = c("A", "B", "E", "C", "D"))) %>%
+  group_by(Treatment, Genet, Timepoint) %>% 
+  reframe(mean_MR = mean(MR*0.7*60*1000), 
+          MR_mgO2L = mean(MR),
+          sd_MR = sd(MR*0.7*60*1000),
+          n = n())
+
+data_means_recov <- data0 %>% 
+  filter(Timepoint == "recovery") %>% 
+  group_by(Treatment, Genet, Timepoint, Temperature) %>%
+  mutate(Treatment = factor(Treatment, levels = c("ambient", "severe MHW", "extreme MHW")),
+         Genet = factor(Genet, levels = c("A", "B", "E", "C", "D"))) %>%
+  reframe(mean_MR = mean(MR*0.7*60*1000), 
+          MR_mgO2L = mean(MR),
+          sd_MR = sd(MR*0.7*60*1000),
+          n = n())
+
+data_means_mhw<- data0 %>% 
+  filter(Timepoint == "MHW") %>% 
+  group_by(Treatment, Genet, Timepoint, Temperature) %>%
+  mutate(Treatment = factor(Treatment, levels = c("ambient", "severe MHW", "extreme MHW")),
+         Genet = factor(Genet, levels = c("A", "B", "E", "C", "D"))) %>%
+  reframe(mean_MR = mean(MR*0.7*60*1000), 
+          MR_mgO2L = mean(MR),
+          sd_MR = sd(MR*0.7*60*1000),
+          n = n())
+
+```
+
+
+```{r respiration figures main, fig.align='center', fig.width=4, fig.height=2.5}
+
+p1 <- data_pred %>% 
+  # filter(Genet == "A" | Genet == "B" | Genet == "E") %>% 
+  mutate(Treatment = factor(Treatment, levels = c("ambient", "severe MHW", "extreme MHW")),
+         Genet = factor(Genet, levels = c("A", "B", "C", "D", "E"))) %>%
+  ggplot(aes(x = Timepoint,
+            y = MR_ml_g_h, 
+            color = factor(Genet),
+            group  = interaction(Treatment, Genet),
+            fill = factor(Genet),
+            label = substr(filename, start = 1, stop = 20))) +
+  geom_point(position = position_dodge(width = 0.3),
+             alpha = 0.3)+
+  facet_wrap(Treatment~.,
+             labeller =  labeller(Treatment = c("ambient" = "Ambient", "severe MHW" = "Severe MHW", "extreme MHW" = "Extreme MHW")))+
+  geom_errorbar(data = data_means, aes(x = Timepoint,
+                                    y = mean_MR,
+                                    ymin = mean_MR - sd_MR,
+                                    ymax = mean_MR + sd_MR,
+                                    color = NULL,
+                                    group = NULL,
+                                    label = NULL),
+             linewidth = 0.3, width = 0,
+             position = position_dodge(width = 0.3))+
+  geom_point(data = data_means, aes(x = Timepoint,
+                                    y = mean_MR,
+                                    color = Genet,
+                                    fill = Genet,
+                                    group  = interaction(Treatment, Genet),
+                                    label = NULL),
+             position = position_dodge(width = 0.3),
+             size = 4, color = "black", pch = 21)+
+  scale_color_manual(values = genet_cols, name = "Genet")+
+  scale_fill_manual(values = genet_cols, name = "Genet")+
+  scale_x_discrete(labels = c("MHW" = "MHW", "recovery" = "Recovery")) +
+  ylab(expression("RMR (ml" ~ O[2]~g^-1~h^1 ~ ")"))+
+  xlab("")+
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, vjust = 1, hjust=1, size=22),
+        axis.text.y=element_text(size=22),
+        axis.title.x=element_blank(),
+        axis.title.y=element_text(size=24),
+        legend.text=element_text(size=18),
+        legend.title=element_text(size=22),
+        strip.text = element_text(size = 24),
+        strip.background = element_rect(fill="white"),
+        legend.position = "top")+
+  # theme(legend.position = "none")+
+  ylim(0, 10)
+  # geom_text(data = data_means_A_B_E,
+  #             mapping = aes(label = paste(Temperature, "ºC", sep = ""),
+  #                         x = Timepoint,
+  #                         y = -1.2), size = 2.5, color = "black")
+p1
+ggsave(p1, filename = here("Figures", "amelia2.png"), height=6, width=10)
+
+
+p2<-data_pred %>% 
+  filter(Timepoint == "recovery") %>% 
+  mutate(Treatment = factor(Treatment, levels = c("ambient", "severe MHW", "extreme MHW"))) %>%
+  ggplot(aes(x = Treatment,
+            y = MR_ml_g_h, 
+            color = factor(Genet),
+            group  = interaction(Treatment, Genet),
+            fill = factor(Genet))) +
+  geom_point(position = position_dodge(width = 0.3),
+             alpha = 0.3)+
+  geom_errorbar(data = data_means_recov, aes(x = Treatment,
+                                    y = mean_MR,
+                                    ymin = mean_MR - sd_MR,
+                                    ymax = mean_MR + sd_MR,
+                                    color = NULL,
+                                    group = NULL),
+             linewidth = 0.3, width = 0,
+             position = position_dodge(width = 0.3))+
+  geom_point(data = data_means_recov, aes(x = Treatment,
+                                    y = mean_MR,
+                                    color = Genet,
+                                    fill = Genet,
+                                    group  = interaction(Treatment, Genet)),
+             position = position_dodge(width = 0.3),
+             size = 3, color = "black", pch = 21)+
+  scale_color_manual(values = genet_cols, name = "Genet")+
+  scale_fill_manual(values = genet_cols, name = "Genet")+
+  ylab(expression("Oxygen uptake (ml" ~ O[2]~g^-1~h^1 ~ ")"))+
+  xlab("")+
+  theme(legend.position = "right")+
+  ylim(-2, 16)+
+  annotate(geom = "text", x = 1.2, y = 15, label = "Recovery 13.5ºC")
+  # geom_text(data = data_means_recov, 
+  #           mapping = aes(label = paste(Temperature, "ºC", sep = ""),
+  #                         x = Treatment,
+  #                         y = -1.2), size = 2.5, color = "black")
+p2
+
+p3<-data_pred %>% 
+  filter(Timepoint == "MHW") %>% 
+  mutate(Treatment = factor(Treatment, levels = c("ambient", "severe MHW", "extreme MHW"))) %>%
+  ggplot(aes(x = Temperature,
+            y = MR_ml_g_h, 
+            color = factor(Genet),
+            group  = interaction(Treatment, Genet),
+            fill = factor(Genet))) +
+  geom_point(position = position_dodge(width = 0.3),
+             alpha = 0.3)+
+  geom_line(data = data_means_mhw, aes(x = Temperature,
+                                    y = mean_MR,
+                                    color = Genet,
+                                    group  = interaction(Timepoint, Genet)),
+             position = position_dodge(width = 0.1))+
+  geom_errorbar(data = data_means_mhw, aes(x = Temperature,
+                                    y = mean_MR,
+                                    ymin = mean_MR - sd_MR,
+                                    ymax = mean_MR + sd_MR,
+                                    color = NULL,
+                                    group = NULL),
+             size = 0.3, width = 0, position = position_dodge(width = 0.3))+
+  geom_point(data = data_means_mhw, aes(x = Temperature,
+                                    y = mean_MR,
+                                    color = Genet,
+                                    fill = Genet,
+                                    group  = interaction(Treatment, Genet)),
+             size = 3, color = "black", pch = 21, position = position_dodge(width = 0.3))+
+  scale_color_manual(values = genet_cols, name = "Genet")+
+  scale_fill_manual(values = genet_cols, name = "Genet")+
+  ylab(expression("Oxygen uptake (ml" ~ O[2]~g^-1~h^1 ~ ")"))+
+  xlab("Temperature ºC")+
+  theme(legend.position = "none")+
+  ylim(-2, 16)
+p3
+
+plot<-cowplot::plot_grid(p1,
+                   cowplot::plot_grid(p2, p3, labels = c("B", "C"), nrow = 2),
+                   labels = c("A", ""), 
+                   align = "hv", 
+                   nrow = 1) 
+ggsave(plot, filename = here("Figures", "Figure1.png"), width = 8, height = 6)
+
+plot<-cowplot::plot_grid(p1,
+                   cowplot::plot_grid(p2, p3, labels = c("B", "C"), nrow = 2),
+                   labels = c("A", ""), 
+                   align = "hv", 
+                   nrow = 1) 
+ggsave(plot, filename = here("Figures", "Figure2.png"), width = 8, height = 6)
+
+
+```
+
+```{r respiration figures scaling, fig.align='center', fig.width=4, fig.height=2.5}
+
+hist(data0$BW)
+p1_size<-data0%>% 
+  # filter(Genet == "A" | Genet == "B" | Genet == "E") %>% 
+  mutate(Treatment = factor(Treatment, levels = c("ambient", "severe MHW", "extreme MHW")),
+         Genet = factor(Genet, levels = c("A", "B", "E", "C", "D")),
+         MR_ml_g_h = MR*0.7*60*1000) %>%
+  ggplot(aes(x = log(BW),
+            y = log(MR_ml_g_h), 
+            color = factor(Genet),
+            group  = interaction(Treatment, Genet),
+            fill = factor(Genet),
+            label = substr(filename, start = 1, stop = 20))) +
+  geom_point(position = position_dodge(width = 0.3),
+             alpha = 1)+
+  facet_grid(Treatment~Timepoint)+
+  scale_color_manual(values = genet_cols, name = "Genet")+
+  scale_fill_manual(values = genet_cols, name = "Genet")+
+  ylab(expression("ln(RMR) (ml" ~ O[2]~g^-1~h^1 ~ ")"))+
+  xlab("ln(Body mass) (g)")+
+  geom_smooth(mapping = aes(color = NULL,
+            group  = interaction(Treatment, Timepoint)), 
+              method = "lm", se = FALSE, color = "black", size = 0.4, linetype = "dashed")+
+  # theme(legend.position = c(0.9, 0.86))+
+  theme(legend.position = "none")+
+  ylim(-2, 3)
+  # geom_text(data = data_means_A_B_E,
+  #             mapping = aes(label = paste(Temperature, "ºC", sep = ""),
+  #                         x = Timepoint,
+  #                         y = -1.2), size = 2.5, color = "black")
+p1_size
+
+ggsave(p1_size, filename = here("Figures", "Figure3_size.png"), width = 4, height = 5)
+
+
+```
+
+
+```{r garabge include=FALSE}
+  # geom_point(data = emmeans_grid, aes(x = Timepoint,
+  #                                     y = response_ml_g_h, 
+  #                                     color = NULL,
+  #                                     group = Genet,
+  #                                     fill = NULL), 
+  #            size = 3, pch = 16, alpha = 1,color = "black",
+  #            position = position_dodge(width = 0.5))+
+  # geom_errorbar(data = emmeans_grid, aes(y = response_ml_g_h,
+  #                                        ymin = lower.CL_ml_g_h, 
+  #                                        ymax = upper.CL_ml_g_h,
+  #                                        color = NULL,
+  #                                     group = NULL,
+  #                                     fill = NULL), 
+  #            size = 1.2, width = 0,
+  #            position = position_dodge(width = 0.5))+  
+```
+
