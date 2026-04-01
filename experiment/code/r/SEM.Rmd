@@ -7,11 +7,13 @@ output: html_document
 
 # Load libraries 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+# knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(root.dir = '~/Documents/GitHub/MHWsim-expt/') # Change to your if you're sam directory
 
 library(brms)
 library(lavaan)
 library(tidyverse)
+
 ```
 
 # Load data 
@@ -69,15 +71,50 @@ all_temp <- all_clean %>%
 sem1_rand <- brm(
   bf(scale(avg_biomass_g) ~ scale(n_true) + scale(avg_temp) + scale(percent_open)) +
     bf(scale(n_true) ~ scale(avg_temp) + (1|genet)) +
-    bf(scale(percent_open) ~ scale(avg_temp)) + # Pressure is gaussian
-    set_rescor(rescor = FALSE), # Temp is gaussian 
+    bf(scale(percent_open) ~ scale(avg_temp)) +
+    set_rescor(rescor = FALSE), 
   data = all_temp,
-  family = gaussian(), # Variance family for count data w/ zeros
+  family = gaussian(),
   chains = 4, iter = 10000,
   save_pars = save_pars(all = TRUE)
 )
 
 summary(sem1_rand)
+
+# With temporal autocorrelation and nested random effects
+library(lubridate)
+
+# Convert date to numeric for GP term (days since first observation)
+all_temp$date_num <- as.numeric(as.Date(all_temp$date) - min(as.Date(all_temp$date)))
+
+all_temp$tank_genet <- paste(all_temp$tank,
+                             all_temp$genet,
+                             sep = "_")
+
+# Fit brms with temporal autocorrelation and truly nested random effects
+sem1_rand_temporal <- brm(
+  bf(scale(avg_biomass_g) ~ scale(n_true) + scale(avg_temp) + scale(percent_open) +
+       scale(avg_temp) : scale(n_true) +
+       gp(date_num, c = 1)) + 
+  bf(scale(n_true) ~ scale(avg_temp) + 
+       (1 | tank/genet) + 
+       gp(date_num, c = 1)) +
+  bf(scale(percent_open) ~ scale(avg_temp) + 
+       gp(date_num, c = 1)) +
+  set_rescor(rescor = FALSE),
+  data = all_temp,
+  family = gaussian(),
+  chains = 4,
+  iter = 10000,
+  save_pars = save_pars(all = TRUE)
+)
+
+summary(sem1_rand_temporal)
+
+plot(sem1_rand_temporal)
+
+# Save temporal bayes model
+save(sem1_rand_temporal, file = "sem1_rand_temporal.RData")
 
 ```
 
@@ -107,6 +144,7 @@ summary(fit, fit.measures = TRUE)
 ```
 
 ## Multilevel SEM to account for repeated measures (maybe?)
+
 ```{r}
 sem_mlm <- '
   # within-group
@@ -131,11 +169,13 @@ fit_mlm <- sem(sem_mlm,
                cluster = "tank_genet") # this is explicit repeated measures part
 
 summary(fit_mlm, fit.measures = TRUE)
+
 ```
 
 ## Add a temporal autoregressive component
 
 ### Make a new df to scale explicitly using tank_genet groupings
+
 ```{r}
 all_ar <- all_clean %>%
   group_by(tank_genet) %>%
@@ -154,6 +194,7 @@ all_ar <- all_clean %>%
 ```
 
 ### Generate the temporal AR model - *This is the current "final" model*
+
 ```{r}
 sem_ar <- '
   sc_size ~ sc_temp + sc_n + sc_behavior
@@ -169,9 +210,110 @@ sem_ar <- '
 # Fit the model
 fit_ar <- sem(sem_ar,
               data = all_ar,
-              cluster = "tank_genet") #this handles the random effect
+              cluster = "tank_genet") # this handles the random effect
 
 summary(fit_ar, fit.measures = TRUE)
+
+```
+
+
+Sam's code for a correct multilevel model with temporal autocorrelation
+
+```{r}
+
+sem_ar_sb <- '
+  # Model fixed effects and autocorrelation
+  level: 1
+  sc_size ~ sc_temp + sc_n + sc_behavior + sc_size_lag
+  sc_n ~ sc_temp + sc_n_lag
+  sc_behavior ~ sc_temp + sc_behavior_lag
+
+  # Random intercets
+  level: 2
+  sc_size ~~ sc_size
+  sc_n ~~ sc_n
+  sc_behavior ~~ sc_behavior
+  
+  # Allow covariance between random intercepts consistent w multilevel model
+  sc_size ~~ sc_n + sc_behavior
+  sc_n ~~ sc_behavior
+'
+
+fit_ar_sb <- sem(
+  sem_ar_sb,
+  data = all_ar,
+  cluster = "tank_genet"
+)
+
+summary(fit_ar_sb, fit.measures = TRUE)
+
+# Compare lavaan results to comparable brms model... most fixed effects are comparable except for temp effect on size. Both sig but different directions of effect.
+# Lavaan
+# Regressions:
+#                    Estimate  Std.Err  z-value  P(>|z|)
+#   sc_size ~                                           
+#     sc_temp           0.053    0.011    5.022    0.000
+#     sc_n             -0.090    0.010   -8.771    0.000
+#     sc_behavior       0.015    0.008    1.800    0.072
+#     sc_size_lag       0.746    0.011   65.998    0.000
+#   sc_n ~                                              
+#     sc_temp           0.020    0.009    2.325    0.020
+#     sc_n_lag          0.858    0.010   84.788    0.000
+#   sc_behavior ~                                       
+#     sc_temp          -0.148    0.028   -5.351    0.000
+#     sc_behavior_lg    0.207    0.031    6.792    0.000
+
+# Regression Coefficients:
+#                                    Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+# scaleavgbiomassg_Intercept             0.41      1.10    -1.77     2.73 1.00     9293     7527
+# scalentrue_Intercept                  -0.66      1.05    -2.95     1.36 1.02      284       34
+# scalepercentopen_Intercept            -0.04      0.24    -0.52     0.45 1.00     5632     6802
+# scaleavgbiomassg_scalen_true          -0.24      0.01    -0.27    -0.21 1.00     1376    13083
+# scaleavgbiomassg_scaleavg_temp        -0.05      0.02    -0.09    -0.02 1.00     6701    13169
+# scaleavgbiomassg_scalepercent_open     0.01      0.02    -0.02     0.04 1.01      469     3600
+# scalentrue_scaleavg_temp               0.02      0.01    -0.01     0.05 1.00     4712    12698
+# scalepercentopen_scaleavg_temp        -0.21      0.03    -0.27    -0.15 1.00     1516    12429
+
+# Let's plot the data to see what coefficient passes the sniff test
+ggplot(data = all_ar,
+       aes(x = sc_temp, y = sc_size, color = sc_n, group = sc_n)) +
+  geom_point() +
+  theme_classic() +
+  scale_color_viridis_c()
+
+# Looks like there's an interactive effect of temp and n
+# small high n genets increase in size at high temp, while large low n's get smaller
+
+# Do fixed effects like sc_size ~ sc_n's increase when removing autoregressive fixed effects?
+sem_no_auto <- '
+  # Model fixed effects and autocorrelation
+  level: 1
+  sc_size ~ sc_temp + sc_n + sc_behavior
+  sc_n ~ sc_temp + sc_n_lag
+  sc_behavior ~ sc_temp + sc_behavior_lag
+
+  # Random intercets
+  level: 2
+  sc_size ~~ sc_size
+  sc_n ~~ sc_n
+  sc_behavior ~~ sc_behavior
+  
+  # Allow covariance between random intercepts consistent w multilevel model
+  sc_size ~~ sc_n + sc_behavior
+  sc_n ~~ sc_behavior
+'
+
+fit_no_auto <- sem(
+  sem_no_auto,
+  data = all_ar,
+  cluster = "tank_genet"
+)
+
+summary(fit_no_auto, fit.measures = TRUE)
+
+# Big increase in n_true effect on size after removing autoregressive effect
+1- (9/57.5)
+
 ```
 
 ### Alternatively, don't scale() the variables and have lavaan sem() handle the standardization
@@ -242,6 +384,7 @@ fit_ml <- sem(sem_ml,
               cluster = "tank_genet")
 
 summary(fit_ml, fit.measures = TRUE, standardized=TRUE)
+
 ```
 
 
