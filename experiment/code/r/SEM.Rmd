@@ -7,8 +7,14 @@ output: html_document
 
 # Load libraries 
 ```{r setup, include=FALSE}
-# knitr::opts_chunk$set(echo = TRUE) #uncomment if Amelia
-# knitr::opts_chunk$set(root.dir = '~/Documents/GitHub/MHWsim-expt/') #uncomment if Sam
+
+# Are you Sam? Make this TRUE if this is you.
+sam <- TRUE
+
+if (sam) {
+  knitr::opts_chunk$set(root.dir = '~/Documents/GitHub/MHWsim-expt/')
+} else {knitr::opts_chunk$set(echo = TRUE)
+}
 
 library(brms)
 library(lavaan)
