@@ -1,14 +1,14 @@
 ---
 title: "SEM"
-author: "Sam Bogan"
+author: "Sam Bogan (and Amelia)"
 date: "2024-12-09"
 output: html_document
 ---
 
 # Load libraries 
 ```{r setup, include=FALSE}
-# knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_chunk$set(root.dir = '~/Documents/GitHub/MHWsim-expt/') # Change to your if you're sam directory
+# knitr::opts_chunk$set(echo = TRUE) #uncomment if Amelia
+# knitr::opts_chunk$set(root.dir = '~/Documents/GitHub/MHWsim-expt/') #uncomment if Sam
 
 library(brms)
 library(lavaan)
@@ -64,6 +64,8 @@ all_temp <- all_clean %>%
 ```
 
 # Bayes SEM
+
+**Hey Sam - keep in mind I was analyzing different variables with the frequentist. "n" would be n_rel AKA (n_true)/first(n_true), since the initial number of polyps differed for every single replicate; "behavior" would percent_fully_open, since that's what I'm using for other analysis; and "size" would be "avg_size" (in mm, not g) since that is the direct measurement rather than the converted measurement (g is a proxy but mm is the most accurate)**
 
 ```{r, eval=FALSE}
 
@@ -191,6 +193,22 @@ all_ar <- all_clean %>%
          sc_behavior_lag = lag(sc_behavior, 1),
          sc_behavior_lag2 = lag(sc_behavior, 2)) %>%
   ungroup()
+
+# This is it with the variables Sam used for Bayes 
+all_ar_new <- all_clean %>%
+  group_by(tank_genet) %>%
+  mutate(n_rel = n_true / first(n_true),
+         sc_size = scale(avg_biomass_g)[, 1],
+         sc_n = scale(n_true)[, 1],
+         sc_temp = scale(avg_temp)[, 1],
+         sc_behavior = scale(percent_open)[, 1],
+         sc_size_lag = ifelse(is.na(sc_size), NA, lag(sc_size, 2)),
+         sc_size_lag2 = ifelse(is.na(sc_size), NA, lag(sc_size, 4)),
+         sc_n_lag = lag(sc_n, 1),
+         sc_n_lag2 = lag(sc_n, 2),
+         sc_behavior_lag = lag(sc_behavior, 1),
+         sc_behavior_lag2 = lag(sc_behavior, 2)) %>%
+  ungroup()
 ```
 
 ### Generate the temporal AR model - *This is the current "final" model*
@@ -220,7 +238,6 @@ summary(fit_ar, fit.measures = TRUE)
 Sam's code for a correct multilevel model with temporal autocorrelation
 
 ```{r}
-
 sem_ar_sb <- '
   # Model fixed effects and autocorrelation
   level: 1
@@ -241,7 +258,7 @@ sem_ar_sb <- '
 
 fit_ar_sb <- sem(
   sem_ar_sb,
-  data = all_ar,
+  data = all_ar_new, # this is the df with the "old" variables Sam used for Bayes
   cluster = "tank_genet"
 )
 
@@ -273,7 +290,10 @@ summary(fit_ar_sb, fit.measures = TRUE)
 # scaleavgbiomassg_scalepercent_open     0.01      0.02    -0.02     0.04 1.01      469     3600
 # scalentrue_scaleavg_temp               0.02      0.01    -0.01     0.05 1.00     4712    12698
 # scalepercentopen_scaleavg_temp        -0.21      0.03    -0.27    -0.15 1.00     1516    12429
+```
 
+
+```{r}
 # Let's plot the data to see what coefficient passes the sniff test
 ggplot(data = all_ar,
        aes(x = sc_temp, y = sc_size, color = sc_n, group = sc_n)) +
