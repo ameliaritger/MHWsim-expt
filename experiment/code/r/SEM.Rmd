@@ -65,15 +65,17 @@ all_temp <- all_clean %>%
 
 # Bayes SEM
 
-**Hey Sam - keep in mind I was analyzing different variables with the frequentist. "n" would be n_rel AKA (n_true)/first(n_true), since the initial number of polyps differed for every single replicate; "behavior" would percent_fully_open, since that's what I'm using for other analysis; and "size" would be "avg_size" (in mm, not g) since that is the direct measurement rather than the converted measurement (g is a proxy but mm is the most accurate)**
+**"n" = n_rel AKA (n_true)/first(n_true), since the initial number of polyps differed for every replicate**
+**"behavior" = percent_fully_open, since that's what I'm using for other analysis**
+**"size" = "avg_size" (in mm, not g) since that is the direct measurement rather than the converted measurement (g is a proxy but mm is the most accurate)**
 
 ```{r, eval=FALSE}
 
 # First pass non time-series, Bayesian model
 sem1_rand <- brm(
-  bf(scale(avg_biomass_g) ~ scale(n_true) + scale(avg_temp) + scale(percent_open)) +
-    bf(scale(n_true) ~ scale(avg_temp) + (1|genet)) +
-    bf(scale(percent_open) ~ scale(avg_temp)) +
+  bf(scale(avg_size) ~ scale(n_rel) + scale(avg_temp) + scale(percent_fully_open)) +
+    bf(scale(n_rel) ~ scale(avg_temp) + (1|genet)) +
+    bf(scale(percent_fully_open) ~ scale(avg_temp)) +
     set_rescor(rescor = FALSE), 
   data = all_temp,
   family = gaussian(),
@@ -95,13 +97,13 @@ all_temp$tank_genet <- paste(all_temp$tank,
 
 # Fit brms with temporal autocorrelation and truly nested random effects
 sem1_rand_temporal <- brm(
-  bf(scale(avg_biomass_g) ~ scale(n_true) + scale(avg_temp) + scale(percent_open) +
-       scale(avg_temp) : scale(n_true) +
+  bf(scale(avg_size) ~ scale(n_rel) + scale(avg_temp) + scale(percent_fully_open) +
+       scale(avg_temp) : scale(n_rel) +
        gp(date_num, c = 1)) + 
-  bf(scale(n_true) ~ scale(avg_temp) + 
+  bf(scale(n_rel) ~ scale(avg_temp) + 
        (1 | tank/genet) + 
        gp(date_num, c = 1)) +
-  bf(scale(percent_open) ~ scale(avg_temp) + 
+  bf(scale(percent_fully_open) ~ scale(avg_temp) + 
        gp(date_num, c = 1)) +
   set_rescor(rescor = FALSE),
   data = all_temp,
@@ -193,22 +195,6 @@ all_ar <- all_clean %>%
          sc_behavior_lag = lag(sc_behavior, 1),
          sc_behavior_lag2 = lag(sc_behavior, 2)) %>%
   ungroup()
-
-# This is it with the variables Sam used for Bayes 
-all_ar_new <- all_clean %>%
-  group_by(tank_genet) %>%
-  mutate(n_rel = n_true / first(n_true),
-         sc_size = scale(avg_biomass_g)[, 1],
-         sc_n = scale(n_true)[, 1],
-         sc_temp = scale(avg_temp)[, 1],
-         sc_behavior = scale(percent_open)[, 1],
-         sc_size_lag = ifelse(is.na(sc_size), NA, lag(sc_size, 2)),
-         sc_size_lag2 = ifelse(is.na(sc_size), NA, lag(sc_size, 4)),
-         sc_n_lag = lag(sc_n, 1),
-         sc_n_lag2 = lag(sc_n, 2),
-         sc_behavior_lag = lag(sc_behavior, 1),
-         sc_behavior_lag2 = lag(sc_behavior, 2)) %>%
-  ungroup()
 ```
 
 ### Generate the temporal AR model - *This is the current "final" model*
@@ -258,7 +244,7 @@ sem_ar_sb <- '
 
 fit_ar_sb <- sem(
   sem_ar_sb,
-  data = all_ar_new, # this is the df with the "old" variables Sam used for Bayes
+  data = all_ar,
   cluster = "tank_genet"
 )
 
